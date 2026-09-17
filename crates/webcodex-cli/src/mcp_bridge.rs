@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
+use std::fs::File;
 use std::io::Read;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -9,36 +12,53 @@ use url::{Host, Url};
 const MAX_STDIN_BYTES: usize = 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TOKEN_BYTES: usize = 64 * 1024;
+const MAX_DESKTOP_STATE_BYTES: usize = 256 * 1024;
 const MAX_OPERATIONS: usize = 128;
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 300_000;
+const DEFAULT_AWAIT_TIMEOUT_MS: u64 = 120_000;
+const DEFAULT_AWAIT_INTERVAL_MS: u64 = 1_000;
+const MIN_AWAIT_INTERVAL_MS: u64 = 100;
 const CLIENT_PROTOCOL_VERSION: &str = "2025-06-18";
 const SESSION_HEADER: &str = "mcp-session-id";
 const PROTOCOL_HEADER: &str = "mcp-protocol-version";
+const DESKTOP_APP_ID: &str = "dev.webcodex.desktop";
+const DESKTOP_STATE_FILE: &str = "desktop-state.json";
 
 const USAGE: &str = "Usage: webcodex mcp-bridge\n\n\
 Read one local MCP bridge job as JSON from stdin, execute its tools/call operations\n\
 sequentially against a loopback WebCodex Streamable HTTP MCP endpoint, and write one\n\
-JSON result to stdout. The Bearer token must be supplied in stdin, never argv.\n\n\
-Input:\n\
-  {\n\
-    \"endpoint\": \"http://127.0.0.1:<port>/mcp\",\n\
-    \"bearerToken\": \"<secret>\",\n\
-    \"operations\": [\n\
-      {\"tool\": \"<tool-name>\", \"arguments\": {}}\n\
-    ],\n\
-    \"timeoutMs\": 120000\n\
-  }\n\n\
+JSON result to stdout.\n\n\
+Connection forms:\n\
+  {\"connection\":\"desktop\", ...}\n\
+  {\"endpoint\":\"http://127.0.0.1:<port>/mcp\",\"bearerToken\":\"<secret>\", ...}\n\n\
+Desktop mode reads the Desktop-owned local state and credential file. Manual mode\n\
+keeps backward compatibility and accepts the Bearer token only through stdin.\n\n\
+Operation extras:\n\
+  \"capture\":{\"jobId\":\"/structuredContent/job/id\"}\n\
+  arguments may use {\"$ref\":\"jobId\"} for typed substitution or \"${jobId}\" in strings.\n\
+  \"await\" can poll another MCP tool until a JSON-pointer predicate matches.\n\n\
 Security:\n\
   The endpoint must be plain HTTP on 127.0.0.1, ::1, or localhost.\n\
   The Bearer token is never included in bridge output or diagnostics.\n\
-  Execution stops at the first transport, JSON-RPC, or MCP tool error.\n";
+  Execution stops at the first transport, JSON-RPC, MCP tool, reference, or await error.\n";
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ConnectionMode {
+    Desktop,
+    Manual,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BridgeJob {
-    endpoint: String,
-    bearer_token: String,
+    #[serde(default)]
+    connection: Option<ConnectionMode>,
+    #[serde(default)]
+    endpoint: Option<String>,
+    #[serde(default)]
+    bearer_token: Option<String>,
     operations: Vec<BridgeOperation>,
     #[serde(default = "default_timeout_ms")]
     timeout_ms: u64,
@@ -50,12 +70,62 @@ struct BridgeOperation {
     tool: String,
     #[serde(default = "empty_object")]
     arguments: Value,
+    #[serde(default)]
+    capture: BTreeMap<String, String>,
+    #[serde(default, rename = "await")]
+    wait: Option<AwaitSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AwaitSpec {
+    tool: String,
+    #[serde(default = "empty_object")]
+    arguments: Value,
+    until: Predicate,
+    #[serde(default)]
+    success: Option<Predicate>,
+    #[serde(default)]
+    capture: BTreeMap<String, String>,
+    #[serde(default = "default_await_interval_ms")]
+    interval_ms: u64,
+    #[serde(default = "default_await_timeout_ms")]
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Predicate {
+    pointer: String,
+    #[serde(default)]
+    equals: Option<Value>,
+    #[serde(default)]
+    any_of: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DesktopStoredConfig {
+    runtime: Option<DesktopStoredRuntime>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DesktopStoredRuntime {
+    server_url: String,
+    user_token_file: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+struct ResolvedConnection {
+    endpoint: Url,
+    bearer_token: String,
+    source: &'static str,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeOutput {
     ok: bool,
+    connection: Option<&'static str>,
     protocol_version: Option<String>,
     completed: usize,
     results: Vec<BridgeOperationResult>,
@@ -64,11 +134,16 @@ struct BridgeOutput {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct BridgeOperationResult {
     index: usize,
     tool: String,
     ok: bool,
     result: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    await_result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    await_polls: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -159,6 +234,7 @@ pub(crate) async fn run() -> i32 {
         Ok(output) => output,
         Err(error) => BridgeOutput {
             ok: false,
+            connection: None,
             protocol_version: None,
             completed: 0,
             results: Vec::new(),
@@ -182,13 +258,19 @@ pub(crate) async fn run() -> i32 {
 
 async fn execute_job(job: BridgeJob) -> Result<BridgeOutput, BridgeError> {
     validate_job(&job)?;
-    let endpoint = validate_endpoint(&job.endpoint)?;
-    let mut client = McpClient::new(endpoint, job.bearer_token, job.timeout_ms)?;
+    let connection = resolve_connection(&job)?;
+    let connection_source = connection.source;
+    let mut client = McpClient::new(
+        connection.endpoint,
+        connection.bearer_token,
+        job.timeout_ms,
+    )?;
 
     if let Err(mut error) = client.initialize().await {
         redact_error(&mut error, &client.bearer_token);
         return Ok(BridgeOutput {
             ok: false,
+            connection: Some(connection_source),
             protocol_version: client.protocol_version.clone(),
             completed: 0,
             results: Vec::new(),
@@ -197,56 +279,118 @@ async fn execute_job(job: BridgeJob) -> Result<BridgeOutput, BridgeError> {
     }
 
     let mut results = Vec::with_capacity(job.operations.len());
+    let mut variables = BTreeMap::<String, Value>::new();
+
     for (index, operation) in job.operations.into_iter().enumerate() {
         let tool = operation.tool;
-        match client.call_tool(&tool, operation.arguments).await {
-            Ok(mut result) => {
-                redact_value(&mut result, &client.bearer_token);
-                let tool_ok = !result
-                    .get("isError")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                results.push(BridgeOperationResult {
-                    index,
-                    tool: tool.clone(),
-                    ok: tool_ok,
-                    result,
-                });
-                if !tool_ok {
-                    client.close().await;
-                    return Ok(BridgeOutput {
-                        ok: false,
-                        protocol_version: client.protocol_version.clone(),
-                        completed: results.len(),
-                        results,
-                        error: Some(
-                            BridgeError::runtime(
-                                "tool_error",
-                                "MCP tool returned isError=true; later operations were not executed",
-                            )
-                            .for_operation(index, &tool),
-                        ),
-                    });
-                }
+        let arguments = match resolve_references(operation.arguments, &variables) {
+            Ok(arguments) => arguments,
+            Err(error) => {
+                client.close().await;
+                return Ok(failed_output(
+                    connection_source,
+                    &client,
+                    results,
+                    error.for_operation(index, &tool),
+                ));
             }
+        };
+
+        let mut result = match client.call_tool(&tool, arguments).await {
+            Ok(result) => result,
             Err(mut error) => {
                 redact_error(&mut error, &client.bearer_token);
-                let error = error.for_operation(index, &tool);
                 client.close().await;
-                return Ok(BridgeOutput {
-                    ok: false,
-                    protocol_version: client.protocol_version.clone(),
-                    completed: results.len(),
+                return Ok(failed_output(
+                    connection_source,
+                    &client,
                     results,
-                    error: Some(error),
-                });
+                    error.for_operation(index, &tool),
+                ));
             }
+        };
+
+        redact_value(&mut result, &client.bearer_token);
+        if is_tool_error(&result) {
+            results.push(BridgeOperationResult {
+                index,
+                tool: tool.clone(),
+                ok: false,
+                result,
+                await_result: None,
+                await_polls: None,
+            });
+            client.close().await;
+            return Ok(failed_output(
+                connection_source,
+                &client,
+                results,
+                BridgeError::runtime(
+                    "tool_error",
+                    "MCP tool returned isError=true; later operations were not executed",
+                )
+                .for_operation(index, &tool),
+            ));
         }
+
+        if let Err(error) = capture_values(&operation.capture, &result, &mut variables) {
+            results.push(BridgeOperationResult {
+                index,
+                tool: tool.clone(),
+                ok: false,
+                result,
+                await_result: None,
+                await_polls: None,
+            });
+            client.close().await;
+            return Ok(failed_output(
+                connection_source,
+                &client,
+                results,
+                error.for_operation(index, &tool),
+            ));
+        }
+
+        let (await_result, await_polls) = if let Some(wait) = operation.wait {
+            match execute_await(&mut client, index, &tool, wait, &mut variables).await {
+                Ok(value) => value,
+                Err(mut error) => {
+                    redact_error(&mut error, &client.bearer_token);
+                    results.push(BridgeOperationResult {
+                        index,
+                        tool: tool.clone(),
+                        ok: false,
+                        result,
+                        await_result: None,
+                        await_polls: None,
+                    });
+                    client.close().await;
+                    return Ok(failed_output(
+                        connection_source,
+                        &client,
+                        results,
+                        error.for_operation(index, &tool),
+                    ));
+                }
+            }
+        } else {
+            (None, None)
+        };
+
+        results.push(BridgeOperationResult {
+            index,
+            tool,
+            ok: true,
+            result,
+            await_result,
+            await_polls,
+        });
     }
 
     client.close().await;
     Ok(BridgeOutput {
         ok: true,
+        connection: Some(connection_source),
         protocol_version: client.protocol_version.clone(),
         completed: results.len(),
         results,
@@ -254,15 +398,87 @@ async fn execute_job(job: BridgeJob) -> Result<BridgeOutput, BridgeError> {
     })
 }
 
+fn failed_output(
+    connection: &'static str,
+    client: &McpClient,
+    results: Vec<BridgeOperationResult>,
+    error: BridgeError,
+) -> BridgeOutput {
+    BridgeOutput {
+        ok: false,
+        connection: Some(connection),
+        protocol_version: client.protocol_version.clone(),
+        completed: results.len(),
+        results,
+        error: Some(error),
+    }
+}
+
+async fn execute_await(
+    client: &mut McpClient,
+    operation_index: usize,
+    parent_tool: &str,
+    wait: AwaitSpec,
+    variables: &mut BTreeMap<String, Value>,
+) -> Result<(Option<Value>, Option<usize>), BridgeError> {
+    validate_await(&wait, operation_index)?;
+    let started = Instant::now();
+    let timeout = Duration::from_millis(wait.timeout_ms);
+    let interval = Duration::from_millis(wait.interval_ms);
+    let mut polls = 0usize;
+
+    loop {
+        if started.elapsed() >= timeout {
+            return Err(BridgeError::runtime(
+                "await_timeout",
+                format!(
+                    "await for operation {operation_index} ({parent_tool}) exceeded {} ms",
+                    wait.timeout_ms
+                ),
+            ));
+        }
+        if polls > 0 {
+            tokio::time::sleep(interval).await;
+        }
+
+        let arguments = resolve_references(wait.arguments.clone(), variables)?;
+        let mut result = client.call_tool(&wait.tool, arguments).await?;
+        redact_value(&mut result, &client.bearer_token);
+        polls += 1;
+
+        if is_tool_error(&result) {
+            return Err(BridgeError::runtime(
+                "tool_error",
+                format!(
+                    "await tool {} returned isError=true; polling stopped",
+                    wait.tool
+                ),
+            ));
+        }
+
+        if predicate_matches(&wait.until, &result)? {
+            if let Some(success) = wait.success.as_ref() {
+                if !predicate_matches(success, &result)? {
+                    return Err(BridgeError {
+                        kind: "await_failed".to_string(),
+                        message: format!(
+                            "await condition completed but success predicate did not match for {}",
+                            wait.tool
+                        ),
+                        operation_index: None,
+                        tool: None,
+                        rpc_code: None,
+                        data: Some(result),
+                    });
+                }
+            }
+            capture_values(&wait.capture, &result, variables)?;
+            return Ok((Some(result), Some(polls)));
+        }
+    }
+}
+
 fn validate_job(job: &BridgeJob) -> Result<(), BridgeError> {
-    if job.bearer_token.trim().is_empty() {
-        return Err(BridgeError::input("bearerToken must not be empty"));
-    }
-    if job.bearer_token.len() > MAX_TOKEN_BYTES {
-        return Err(BridgeError::input(format!(
-            "bearerToken exceeds the {MAX_TOKEN_BYTES}-byte limit"
-        )));
-    }
     if job.operations.is_empty() {
         return Err(BridgeError::input(
             "operations must contain at least one tool call",
@@ -278,19 +494,293 @@ fn validate_job(job: &BridgeJob) -> Result<(), BridgeError> {
             "timeoutMs must be between 1000 and {MAX_TIMEOUT_MS}"
         )));
     }
-    for (index, operation) in job.operations.iter().enumerate() {
-        if operation.tool.trim().is_empty() || operation.tool.len() > 256 {
-            return Err(BridgeError::input(format!(
-                "operations[{index}].tool must contain 1..=256 bytes"
-            )));
+
+    match job.connection {
+        Some(ConnectionMode::Desktop) => {
+            if job.endpoint.is_some() || job.bearer_token.is_some() {
+                return Err(BridgeError::input(
+                    "connection=desktop must not include endpoint or bearerToken",
+                ));
+            }
         }
+        Some(ConnectionMode::Manual) | None => {
+            let endpoint_present = job
+                .endpoint
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty());
+            let token_present = job
+                .bearer_token
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty());
+            if !endpoint_present || !token_present {
+                return Err(BridgeError::input(
+                    "manual bridge jobs require endpoint and bearerToken; use connection=desktop for automatic Desktop discovery",
+                ));
+            }
+            if job
+                .bearer_token
+                .as_ref()
+                .is_some_and(|value| value.len() > MAX_TOKEN_BYTES)
+            {
+                return Err(BridgeError::input(format!(
+                    "bearerToken exceeds the {MAX_TOKEN_BYTES}-byte limit"
+                )));
+            }
+        }
+    }
+
+    for (index, operation) in job.operations.iter().enumerate() {
+        validate_tool_name(&operation.tool, &format!("operations[{index}].tool"))?;
         if !operation.arguments.is_object() {
             return Err(BridgeError::input(format!(
                 "operations[{index}].arguments must be a JSON object"
             )));
         }
+        validate_capture_map(&operation.capture, &format!("operations[{index}].capture"))?;
+        if let Some(wait) = operation.wait.as_ref() {
+            validate_await(wait, index)?;
+        }
     }
     Ok(())
+}
+
+fn validate_await(wait: &AwaitSpec, index: usize) -> Result<(), BridgeError> {
+    validate_tool_name(&wait.tool, &format!("operations[{index}].await.tool"))?;
+    if !wait.arguments.is_object() {
+        return Err(BridgeError::input(format!(
+            "operations[{index}].await.arguments must be a JSON object"
+        )));
+    }
+    if !(MIN_AWAIT_INTERVAL_MS..=60_000).contains(&wait.interval_ms) {
+        return Err(BridgeError::input(format!(
+            "operations[{index}].await.intervalMs must be between {MIN_AWAIT_INTERVAL_MS} and 60000"
+        )));
+    }
+    if !(1_000..=MAX_TIMEOUT_MS).contains(&wait.timeout_ms) {
+        return Err(BridgeError::input(format!(
+            "operations[{index}].await.timeoutMs must be between 1000 and {MAX_TIMEOUT_MS}"
+        )));
+    }
+    validate_predicate(&wait.until, &format!("operations[{index}].await.until"))?;
+    if let Some(success) = wait.success.as_ref() {
+        validate_predicate(success, &format!("operations[{index}].await.success"))?;
+    }
+    validate_capture_map(&wait.capture, &format!("operations[{index}].await.capture"))?;
+    Ok(())
+}
+
+fn validate_tool_name(value: &str, field: &str) -> Result<(), BridgeError> {
+    if value.trim().is_empty() || value.len() > 256 {
+        return Err(BridgeError::input(format!(
+            "{field} must contain 1..=256 bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_capture_map(
+    capture: &BTreeMap<String, String>,
+    field: &str,
+) -> Result<(), BridgeError> {
+    for (name, pointer) in capture {
+        if !valid_variable_name(name) {
+            return Err(BridgeError::input(format!(
+                "{field} contains invalid variable name {name:?}"
+            )));
+        }
+        if !pointer.is_empty() && !pointer.starts_with('/') {
+            return Err(BridgeError::input(format!(
+                "{field}.{name} must be an RFC 6901 JSON pointer"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_predicate(predicate: &Predicate, field: &str) -> Result<(), BridgeError> {
+    if !predicate.pointer.is_empty() && !predicate.pointer.starts_with('/') {
+        return Err(BridgeError::input(format!(
+            "{field}.pointer must be an RFC 6901 JSON pointer"
+        )));
+    }
+    let modes = (predicate.equals.is_some() as usize) + (!predicate.any_of.is_empty() as usize);
+    if modes != 1 {
+        return Err(BridgeError::input(format!(
+            "{field} must specify exactly one of equals or anyOf"
+        )));
+    }
+    Ok(())
+}
+
+fn resolve_connection(job: &BridgeJob) -> Result<ResolvedConnection, BridgeError> {
+    match job.connection {
+        Some(ConnectionMode::Desktop) => discover_desktop_connection(),
+        Some(ConnectionMode::Manual) | None => {
+            let endpoint = validate_endpoint(job.endpoint.as_deref().unwrap_or_default())?;
+            let bearer_token = job.bearer_token.clone().unwrap_or_default();
+            if bearer_token.trim().is_empty() {
+                return Err(BridgeError::input("bearerToken must not be empty"));
+            }
+            Ok(ResolvedConnection {
+                endpoint,
+                bearer_token,
+                source: "manual",
+            })
+        }
+    }
+}
+
+fn discover_desktop_connection() -> Result<ResolvedConnection, BridgeError> {
+    let state_path = desktop_state_path()?;
+    discover_desktop_connection_from_state_path(&state_path)
+}
+
+fn discover_desktop_connection_from_state_path(
+    path: &Path,
+) -> Result<ResolvedConnection, BridgeError> {
+    let bytes = read_bounded_file(path, MAX_DESKTOP_STATE_BYTES, "Desktop state")?;
+    let config: DesktopStoredConfig = serde_json::from_slice(&bytes).map_err(|_| {
+        BridgeError::runtime(
+            "desktop_state",
+            "Desktop state is unreadable; start or reconfigure WebCodex Desktop",
+        )
+    })?;
+    let runtime = config.runtime.ok_or_else(|| {
+        BridgeError::runtime("desktop_state", "Desktop local runtime is not configured")
+    })?;
+
+    let endpoint = desktop_mcp_url(&runtime.server_url)?;
+    let token_path = runtime.user_token_file.ok_or_else(|| {
+        BridgeError::runtime(
+            "desktop_state",
+            "Desktop local runtime credential path is unavailable",
+        )
+    })?;
+    let token_bytes = read_bounded_file(&token_path, MAX_TOKEN_BYTES, "Desktop MCP credential")?;
+    let token = String::from_utf8(token_bytes).map_err(|_| {
+        BridgeError::runtime(
+            "desktop_state",
+            "Desktop MCP credential is not valid UTF-8",
+        )
+    })?;
+    let bearer_token = token.trim().to_string();
+    if bearer_token.is_empty() {
+        return Err(BridgeError::runtime(
+            "desktop_state",
+            "Desktop MCP credential is empty",
+        ));
+    }
+
+    Ok(ResolvedConnection {
+        endpoint,
+        bearer_token,
+        source: "desktop",
+    })
+}
+
+fn desktop_state_path() -> Result<PathBuf, BridgeError> {
+    if let Some(path) = std::env::var_os("WEBCODEX_DESKTOP_STATE_FILE") {
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let root = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+            BridgeError::runtime(
+                "desktop_state",
+                "LOCALAPPDATA is unavailable; set WEBCODEX_DESKTOP_STATE_FILE explicitly",
+            )
+        })?;
+        return Ok(PathBuf::from(root)
+            .join(DESKTOP_APP_ID)
+            .join(DESKTOP_STATE_FILE));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            BridgeError::runtime(
+                "desktop_state",
+                "HOME is unavailable; set WEBCODEX_DESKTOP_STATE_FILE explicitly",
+            )
+        })?;
+        return Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join(DESKTOP_APP_ID)
+            .join(DESKTOP_STATE_FILE));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(root) = std::env::var_os("XDG_DATA_HOME") {
+            if !root.is_empty() {
+                return Ok(PathBuf::from(root)
+                    .join(DESKTOP_APP_ID)
+                    .join(DESKTOP_STATE_FILE));
+            }
+        }
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            BridgeError::runtime(
+                "desktop_state",
+                "HOME is unavailable; set WEBCODEX_DESKTOP_STATE_FILE explicitly",
+            )
+        })?;
+        return Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join(DESKTOP_APP_ID)
+            .join(DESKTOP_STATE_FILE));
+    }
+
+    #[allow(unreachable_code)]
+    Err(BridgeError::runtime(
+        "desktop_state",
+        "automatic Desktop discovery is not supported on this platform; set WEBCODEX_DESKTOP_STATE_FILE explicitly",
+    ))
+}
+
+fn read_bounded_file(path: &Path, max_bytes: usize, label: &str) -> Result<Vec<u8>, BridgeError> {
+    let file = File::open(path)
+        .map_err(|_| BridgeError::runtime("desktop_state", format!("{label} is unavailable")))?;
+    let mut bytes = Vec::new();
+    file.take((max_bytes + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| {
+            BridgeError::runtime("desktop_state", format!("failed to read {label}"))
+        })?;
+    if bytes.is_empty() || bytes.len() > max_bytes {
+        return Err(BridgeError::runtime(
+            "desktop_state",
+            format!("{label} is empty or exceeds the {max_bytes}-byte limit"),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn desktop_mcp_url(server_url: &str) -> Result<Url, BridgeError> {
+    let mut url = Url::parse(server_url)
+        .map_err(|_| BridgeError::runtime("desktop_state", "Desktop server URL is invalid"))?;
+    if url.scheme() != "http" || !is_loopback_host(&url) {
+        return Err(BridgeError::runtime(
+            "desktop_state",
+            "Desktop refused non-loopback MCP discovery data",
+        ));
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(BridgeError::runtime(
+            "desktop_state",
+            "Desktop server URL contains unsupported credentials, query, or fragment",
+        ));
+    }
+    url.set_path("/mcp");
+    validate_endpoint(url.as_str())
 }
 
 fn validate_endpoint(value: &str) -> Result<Url, BridgeError> {
@@ -301,13 +791,7 @@ fn validate_endpoint(value: &str) -> Result<Url, BridgeError> {
             "endpoint must use plain HTTP for the Desktop loopback MCP endpoint",
         ));
     }
-    let loopback = match url.host() {
-        Some(Host::Ipv4(address)) => address.is_loopback(),
-        Some(Host::Ipv6(address)) => address.is_loopback(),
-        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-        None => false,
-    };
-    if !loopback {
+    if !is_loopback_host(&url) {
         return Err(BridgeError::input(
             "endpoint host must be 127.0.0.1, ::1, or localhost",
         ));
@@ -328,6 +812,156 @@ fn validate_endpoint(value: &str) -> Result<Url, BridgeError> {
         ));
     }
     Ok(url)
+}
+
+fn is_loopback_host(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
+}
+
+fn capture_values(
+    capture: &BTreeMap<String, String>,
+    result: &Value,
+    variables: &mut BTreeMap<String, Value>,
+) -> Result<(), BridgeError> {
+    for (name, pointer) in capture {
+        let value = result.pointer(pointer).cloned().ok_or_else(|| {
+            BridgeError::runtime(
+                "reference",
+                format!("capture {name:?} could not resolve JSON pointer {pointer:?}"),
+            )
+        })?;
+        variables.insert(name.clone(), value);
+    }
+    Ok(())
+}
+
+fn resolve_references(
+    value: Value,
+    variables: &BTreeMap<String, Value>,
+) -> Result<Value, BridgeError> {
+    match value {
+        Value::Object(mut object) => {
+            if object.len() == 1 {
+                if let Some(reference) = object.remove("$ref") {
+                    let name = reference.as_str().ok_or_else(|| {
+                        BridgeError::runtime("reference", "$ref value must be a string")
+                    })?;
+                    return variables.get(name).cloned().ok_or_else(|| {
+                        BridgeError::runtime(
+                            "reference",
+                            format!("unknown captured variable {name:?}"),
+                        )
+                    });
+                }
+            }
+            for value in object.values_mut() {
+                let current = std::mem::replace(value, Value::Null);
+                *value = resolve_references(current, variables)?;
+            }
+            Ok(Value::Object(object))
+        }
+        Value::Array(mut values) => {
+            for value in &mut values {
+                let current = std::mem::replace(value, Value::Null);
+                *value = resolve_references(current, variables)?;
+            }
+            Ok(Value::Array(values))
+        }
+        Value::String(text) => Ok(Value::String(interpolate_string(&text, variables)?)),
+        scalar => Ok(scalar),
+    }
+}
+
+fn interpolate_string(
+    text: &str,
+    variables: &BTreeMap<String, Value>,
+) -> Result<String, BridgeError> {
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find("${") {
+        output.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let end = after.find('}').ok_or_else(|| {
+            BridgeError::runtime("reference", "unterminated ${...} reference")
+        })?;
+        let name = &after[..end];
+        if !valid_variable_name(name) {
+            return Err(BridgeError::runtime(
+                "reference",
+                format!("invalid variable reference {name:?}"),
+            ));
+        }
+        let value = variables.get(name).ok_or_else(|| {
+            BridgeError::runtime(
+                "reference",
+                format!("unknown captured variable {name:?}"),
+            )
+        })?;
+        output.push_str(&scalar_to_string(value).ok_or_else(|| {
+            BridgeError::runtime(
+                "reference",
+                format!(
+                    "variable {name:?} is not scalar; use {{\"$ref\":\"{name}\"}} for typed substitution"
+                ),
+            )
+        })?);
+        rest = &after[end + 1..];
+    }
+    output.push_str(rest);
+    Ok(output)
+}
+
+fn scalar_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Null => Some("null".to_string()),
+        Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn valid_variable_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    if value.len() > 64 {
+        return false;
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn predicate_matches(predicate: &Predicate, value: &Value) -> Result<bool, BridgeError> {
+    let actual = value.pointer(&predicate.pointer).ok_or_else(|| {
+        BridgeError::runtime(
+            "await_condition",
+            format!(
+                "await predicate could not resolve JSON pointer {:?}",
+                predicate.pointer
+            ),
+        )
+    })?;
+    if let Some(expected) = predicate.equals.as_ref() {
+        return Ok(actual == expected);
+    }
+    Ok(predicate.any_of.iter().any(|expected| actual == expected))
+}
+
+fn is_tool_error(result: &Value) -> bool {
+    result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 impl McpClient {
@@ -627,6 +1261,7 @@ fn bounded_excerpt(text: &str, max_chars: usize) -> String {
 fn write_input_error(message: impl Into<String>) -> i32 {
     let output = BridgeOutput {
         ok: false,
+        connection: None,
         protocol_version: None,
         completed: 0,
         results: Vec::new(),
@@ -640,14 +1275,23 @@ fn write_output(output: &BridgeOutput) {
     match serde_json::to_string(output) {
         Ok(json) => println!("{json}"),
         Err(error) => println!(
-            "{{\"ok\":false,\"protocolVersion\":null,\"completed\":0,\"results\":[],\"error\":{{\"kind\":\"serialization\",\"message\":{}}}}}",
-            serde_json::to_string(&error.to_string()).unwrap_or_else(|_| "\"serialization failure\"".to_string())
+            "{{\"ok\":false,\"connection\":null,\"protocolVersion\":null,\"completed\":0,\"results\":[],\"error\":{{\"kind\":\"serialization\",\"message\":{}}}}}",
+            serde_json::to_string(&error.to_string())
+                .unwrap_or_else(|_| "\"serialization failure\"".to_string())
         ),
     }
 }
 
 fn default_timeout_ms() -> u64 {
     DEFAULT_TIMEOUT_MS
+}
+
+fn default_await_timeout_ms() -> u64 {
+    DEFAULT_AWAIT_TIMEOUT_MS
+}
+
+fn default_await_interval_ms() -> u64 {
+    DEFAULT_AWAIT_INTERVAL_MS
 }
 
 fn empty_object() -> Value {
@@ -670,22 +1314,105 @@ mod tests {
     }
 
     #[test]
-    fn bridge_job_requires_object_arguments_and_nonempty_secret() {
-        let job: BridgeJob = serde_json::from_value(json!({
+    fn preserves_manual_job_compatibility_and_accepts_desktop_mode() {
+        let manual: BridgeJob = serde_json::from_value(json!({
             "endpoint": "http://127.0.0.1:1234/mcp",
             "bearerToken": "secret",
             "operations": [{"tool": "list_jobs", "arguments": {}}]
         }))
         .unwrap();
-        assert!(validate_job(&job).is_ok());
+        assert!(validate_job(&manual).is_ok());
 
-        let bad: BridgeJob = serde_json::from_value(json!({
-            "endpoint": "http://127.0.0.1:1234/mcp",
-            "bearerToken": "secret",
-            "operations": [{"tool": "list_jobs", "arguments": []}]
+        let desktop: BridgeJob = serde_json::from_value(json!({
+            "connection": "desktop",
+            "operations": [{"tool": "list_jobs", "arguments": {}}]
         }))
         .unwrap();
-        assert!(validate_job(&bad).is_err());
+        assert!(validate_job(&desktop).is_ok());
+
+        let mixed: BridgeJob = serde_json::from_value(json!({
+            "connection": "desktop",
+            "endpoint": "http://127.0.0.1:1234/mcp",
+            "operations": [{"tool": "list_jobs", "arguments": {}}]
+        }))
+        .unwrap();
+        assert!(validate_job(&mixed).is_err());
+    }
+
+    #[test]
+    fn resolves_typed_and_string_references() {
+        let variables = BTreeMap::from([
+            ("jobId".to_string(), Value::String("job-123".to_string())),
+            ("count".to_string(), Value::from(3)),
+            ("payload".to_string(), json!({"nested": true})),
+        ]);
+        let value = json!({
+            "job": {"$ref": "jobId"},
+            "label": "job=${jobId};count=${count}",
+            "payload": {"$ref": "payload"}
+        });
+        let resolved = resolve_references(value, &variables).unwrap();
+        assert_eq!(resolved["job"], "job-123");
+        assert_eq!(resolved["label"], "job=job-123;count=3");
+        assert_eq!(resolved["payload"]["nested"], true);
+    }
+
+    #[test]
+    fn captures_json_pointer_values() {
+        let mut variables = BTreeMap::new();
+        let capture = BTreeMap::from([(
+            "jobId".to_string(),
+            "/structuredContent/job/id".to_string(),
+        )]);
+        let result = json!({"structuredContent":{"job":{"id":"job-9"}}});
+        capture_values(&capture, &result, &mut variables).unwrap();
+        assert_eq!(variables["jobId"], "job-9");
+    }
+
+    #[test]
+    fn predicates_match_equals_and_any_of() {
+        let value = json!({"structuredContent":{"job":{"status":"completed"}}});
+        let equals: Predicate = serde_json::from_value(json!({
+            "pointer": "/structuredContent/job/status",
+            "equals": "completed"
+        }))
+        .unwrap();
+        assert!(predicate_matches(&equals, &value).unwrap());
+
+        let any_of: Predicate = serde_json::from_value(json!({
+            "pointer": "/structuredContent/job/status",
+            "anyOf": ["completed", "failed"]
+        }))
+        .unwrap();
+        assert!(predicate_matches(&any_of, &value).unwrap());
+    }
+
+    #[test]
+    fn discovers_desktop_connection_from_state_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let token_path = dir.path().join("token.txt");
+        std::fs::write(&token_path, "secret-token\n").unwrap();
+        let state_path = dir.path().join("desktop-state.json");
+        std::fs::write(
+            &state_path,
+            serde_json::to_vec(&json!({
+                "runtime": {
+                    "server_url": "http://127.0.0.1:58208",
+                    "user_token_file": token_path,
+                    "server_env_file": null,
+                    "runner_config": null,
+                    "project_id": null,
+                    "runtime_project_id": null
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let connection = discover_desktop_connection_from_state_path(&state_path).unwrap();
+        assert_eq!(connection.endpoint.as_str(), "http://127.0.0.1:58208/mcp");
+        assert_eq!(connection.bearer_token, "secret-token");
+        assert_eq!(connection.source, "desktop");
     }
 
     #[test]
