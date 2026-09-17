@@ -51,7 +51,7 @@ const initialState = {
   openai_tunnel_config: {
     tunnel_id_present: false,
     api_key_present: false,
-    source: "none",
+    source: "invalid",
     saved_tunnel_id: null,
   },
   regular_tunnel_available: true,
