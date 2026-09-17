@@ -134,6 +134,16 @@ export function ConnectionPanel({
       setLocalHandoffLoading(false);
       return () => { cancelled = true; };
     }
+    // Some host/test shims can expose an older narrow Desktop API while the UI bundle
+    // is being upgraded. Treat that as unavailable handoff metadata instead of
+    // crashing the Connection page. Production builds register this command together
+    // with the UI bundle.
+    if (typeof desktopApi.getLocalMcpHandoff !== "function") {
+      setLocalHandoff(null);
+      setLocalHandoffError(null);
+      setLocalHandoffLoading(false);
+      return () => { cancelled = true; };
+    }
     setLocalHandoffLoading(true);
     setLocalHandoffError(null);
     void desktopApi.getLocalMcpHandoff()
