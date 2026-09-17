@@ -6,6 +6,13 @@ import type {
   TunnelProxyMode,
 } from "../models/topology";
 
+export interface LocalMcpHandoff {
+  mcpUrl: string;
+  authentication: "bearer";
+  loopbackOnly: boolean;
+  credentialAvailable: boolean;
+}
+
 export const desktopApi = {
   updateTunnelConfig: (request: { action: "save"; tunnelId: string; apiKey: string | null } | { action: "use_environment" }) =>
     invoke<DesktopState>("update_tunnel_config", { request }),
@@ -48,6 +55,8 @@ export const desktopApi = {
   stopQuickShare: () => invoke<DesktopState>("stop_quick_share"),
   startRegularTunnel: () => invoke<DesktopState>("start_regular_tunnel"),
   stopRegularTunnel: () => invoke<DesktopState>("stop_regular_tunnel"),
+  getLocalMcpHandoff: () => invoke<LocalMcpHandoff>("get_local_mcp_handoff"),
+  getLocalMcpCredential: () => invoke<string>("get_local_mcp_credential"),
   stopLocalRuntime: () => invoke<DesktopState>("stop_local_runtime"),
   cancelOperation: (operationId: string) =>
     invoke<DesktopState>("cancel_desktop_operation", {
@@ -57,4 +66,3 @@ export const desktopApi = {
 };
 
 export type QuickShareProvider = "cloudflare" | "openai" | "none";
-
