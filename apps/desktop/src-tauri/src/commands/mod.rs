@@ -1,11 +1,14 @@
 use crate::activity::ActivityEntry;
 use crate::desktop_shell;
 use crate::error::DesktopError;
-use crate::models::{DesktopStateSnapshot, ProjectSelection, TunnelProxyMode};
+use crate::models::{
+    DesktopStateSnapshot, ProjectSelection, ServerTopology, StoredDesktopConfig, TunnelProxyMode,
+};
 use crate::state::AppState;
 use crate::tray;
-use serde::Deserialize;
-use tauri::{AppHandle, State};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
+use url::{Host, Url};
 
 #[tauri::command]
 pub async fn update_tunnel_config(
@@ -60,6 +63,15 @@ pub struct TunnelProxyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct LaunchAtLoginRequest {
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalMcpHandoff {
+    pub mcp_url: String,
+    pub authentication: String,
+    pub loopback_only: bool,
+    pub credential_available: bool,
 }
 
 fn project_state_result(
@@ -242,6 +254,54 @@ pub async fn stop_regular_tunnel(
 }
 
 #[tauri::command]
+pub async fn get_local_mcp_handoff(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LocalMcpHandoff, DesktopError> {
+    ensure_local_mcp_ready(&state.get_state())?;
+    let config = load_desktop_config(&app).await?;
+    let runtime = config.runtime.ok_or_else(local_mcp_unavailable)?;
+    let mcp_url = local_mcp_url(&runtime.server_url)?;
+    let credential_available = runtime
+        .user_token_file
+        .as_ref()
+        .is_some_and(|path| path.is_file());
+    if !credential_available {
+        return Err(local_mcp_unavailable());
+    }
+    Ok(LocalMcpHandoff {
+        mcp_url,
+        authentication: "bearer".to_string(),
+        loopback_only: true,
+        credential_available,
+    })
+}
+
+#[tauri::command]
+pub async fn get_local_mcp_credential(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, DesktopError> {
+    ensure_local_mcp_ready(&state.get_state())?;
+    let config = load_desktop_config(&app).await?;
+    let runtime = config.runtime.ok_or_else(local_mcp_unavailable)?;
+    let _ = local_mcp_url(&runtime.server_url)?;
+    let token_file = runtime.user_token_file.ok_or_else(local_mcp_unavailable)?;
+    let bytes = tokio::fs::read(&token_file)
+        .await
+        .map_err(|_| local_mcp_unavailable())?;
+    if bytes.is_empty() || bytes.len() > 64 * 1024 {
+        return Err(local_mcp_unavailable());
+    }
+    let token = String::from_utf8(bytes).map_err(|_| local_mcp_unavailable())?;
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(local_mcp_unavailable());
+    }
+    Ok(token.to_string())
+}
+
+#[tauri::command]
 pub async fn stop_local_runtime(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -263,4 +323,90 @@ pub async fn get_bounded_activity(
     state: State<'_, AppState>,
 ) -> Result<Vec<ActivityEntry>, DesktopError> {
     Ok(state.activity())
+}
+
+fn ensure_local_mcp_ready(snapshot: &DesktopStateSnapshot) -> Result<(), DesktopError> {
+    let local_server = snapshot
+        .topology
+        .as_ref()
+        .is_some_and(|topology| matches!(&topology.server, ServerTopology::Local));
+    if !local_server || !snapshot.readiness.runtime_ready {
+        return Err(DesktopError::new(
+            "local_mcp_unavailable",
+            "The local MCP endpoint is not ready",
+            "Start the local runtime and wait for Service, Runner, and Project to become ready.",
+        ));
+    }
+    Ok(())
+}
+
+async fn load_desktop_config(app: &AppHandle) -> Result<StoredDesktopConfig, DesktopError> {
+    let data_dir = app.path().app_local_data_dir().map_err(|_| {
+        DesktopError::new(
+            "local_mcp_unavailable",
+            "Desktop local state is unavailable",
+            "Check local application-data permissions and retry.",
+        )
+    })?;
+    let bytes = tokio::fs::read(data_dir.join("desktop-state.json"))
+        .await
+        .map_err(|_| local_mcp_unavailable())?;
+    if bytes.is_empty() || bytes.len() > 256 * 1024 {
+        return Err(local_mcp_unavailable());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| local_mcp_unavailable())
+}
+
+fn local_mcp_url(server_url: &str) -> Result<String, DesktopError> {
+    let mut url = Url::parse(server_url).map_err(|_| local_mcp_unavailable())?;
+    let loopback = match url.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        None => false,
+    };
+    if url.scheme() != "http" || !loopback {
+        return Err(DesktopError::new(
+            "local_mcp_not_loopback",
+            "Desktop refused to expose non-loopback MCP handoff data",
+            "Use the Desktop-owned local runtime for tunnel-free local MCP access.",
+        ));
+    }
+    url.set_path("/mcp");
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.to_string())
+}
+
+fn local_mcp_unavailable() -> DesktopError {
+    DesktopError::new(
+        "local_mcp_unavailable",
+        "Local MCP connection information is unavailable",
+        "Start or reconfigure the local runtime, then retry.",
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_mcp_url_accepts_only_loopback_http() {
+        assert_eq!(
+            local_mcp_url("http://127.0.0.1:58208").unwrap(),
+            "http://127.0.0.1:58208/mcp"
+        );
+        assert_eq!(
+            local_mcp_url("http://localhost:8080/").unwrap(),
+            "http://localhost:8080/mcp"
+        );
+        assert_eq!(
+            local_mcp_url("https://example.test").unwrap_err().code,
+            "local_mcp_not_loopback"
+        );
+        assert_eq!(
+            local_mcp_url("http://192.168.1.10:8080").unwrap_err().code,
+            "local_mcp_not_loopback"
+        );
+    }
 }
