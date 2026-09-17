@@ -66,7 +66,7 @@ export function ConnectionPanel({
           <h2 id="remote-server-title">{t("connection.remoteServer")}</h2>
           <strong>{topology.server.url}</strong>
           <dl className="detail-list">
-            <div><dt>Runner</dt><dd>{t("connection.runnerThisComputer")}</dd></div>
+            <div><dt>{t("home.runner")}</dt><dd>{t("connection.runnerThisComputer")}</dd></div>
             <div><dt>{t("connection.methods")}</dt><dd>{t("connection.externalManagedRemote")}</dd></div>
           </dl>
         </article>
@@ -79,7 +79,7 @@ export function ConnectionPanel({
       <section className="page-section" aria-labelledby="connection-title" data-webcodex-page="connection">
         <PageHeading />
         <article className="detail-card">
-          <span className="section-kicker">Quick Share</span>
+          <span className="section-kicker">{t("activity.source.quick_share")}</span>
           <strong>{currentConnection(state, t)}</strong>
           <p>{t("connection.quickShareManaged")}</p>
         </article>
@@ -116,9 +116,9 @@ export function ConnectionPanel({
       {error && <LocalizedError error={error} />}
 
       {state.regular_tunnel ? (
-        <article className="handoff-card" aria-label="OpenAI Secure Tunnel">
+        <article className="handoff-card" aria-label={t("activity.source.regular_tunnel")}>
           <div>
-            <span className="section-kicker">OpenAI Secure Tunnel</span>
+            <span className="section-kicker">{t("activity.source.regular_tunnel")}</span>
             <span>{tunnelError ? t("workspace.stopToRetry") : !tunnelEstablished ? t("connection.tunnelStarting") : null}</span>
           </div>
           <button
@@ -150,7 +150,7 @@ export function ConnectionPanel({
               value="openai"
               checked={provider === "openai"}
               onChange={chooseProvider}
-              title="OpenAI Secure Tunnel"
+              title={t("activity.source.regular_tunnel")}
               description={state.openai_tunnel_configured ? t("connection.openaiDescription") : t("connection.openaiNotConfigured")}
               disabled={mutationBusy || !state.openai_tunnel_configured}
             />
@@ -167,7 +167,7 @@ export function ConnectionPanel({
       )}
       {tunnelId && (
         <article className="detail-card tunnel-copy">
-          <label htmlFor="active-tunnel-id">Tunnel ID</label>
+          <label htmlFor="active-tunnel-id">{t("tunnelConfig.tunnelId")}</label>
           <input id="active-tunnel-id" readOnly value={tunnelId} onFocus={(event) => event.target.select()} />
           <button className="secondary-button" onClick={() => void copyTunnelId()}>{t("connection.copyTunnelId")}</button>
           <span role="status">{copyStatus === "copied" ? t("connection.clipboardReady") : copyStatus === "failed" ? t("connection.copyFailed") : ""}</span>
@@ -255,11 +255,11 @@ function LocalizedError({ error }: { error: DesktopError }) {
 }
 
 function currentConnection(state: DesktopState, t: ReturnType<typeof useLocale>["t"]) {
-  if (state.regular_tunnel) return "OpenAI Secure Tunnel";
+  if (state.regular_tunnel) return t("activity.source.regular_tunnel");
   const exposure = state.topology?.exposure;
   if (!exposure || exposure.kind === "none") return t("connection.noDesktopTunnel");
-  if (exposure.kind === "existing_https") return `Existing HTTPS · ${exposure.url}`;
-  if (exposure.kind === "cloudflare") return "Cloudflare Quick Share";
-  return "OpenAI Secure Tunnel";
+  if (exposure.kind === "existing_https") return `HTTPS · ${exposure.url}`;
+  if (exposure.kind === "cloudflare") return `Cloudflare · ${t("activity.source.quick_share")}`;
+  return t("activity.source.regular_tunnel");
 }
 
