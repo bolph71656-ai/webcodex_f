@@ -132,7 +132,9 @@ pub(crate) async fn run() -> i32 {
         return 0;
     }
     if !trailing.is_empty() {
-        return write_input_error("mcp-bridge accepts no command-line options; provide the job on stdin");
+        return write_input_error(
+            "mcp-bridge accepts no command-line options; provide the job on stdin",
+        );
     }
 
     let mut input = Vec::new();
@@ -183,7 +185,8 @@ async fn execute_job(job: BridgeJob) -> Result<BridgeOutput, BridgeError> {
     let endpoint = validate_endpoint(&job.endpoint)?;
     let mut client = McpClient::new(endpoint, job.bearer_token, job.timeout_ms)?;
 
-    if let Err(error) = client.initialize().await {
+    if let Err(mut error) = client.initialize().await {
+        redact_error(&mut error, &client.bearer_token);
         return Ok(BridgeOutput {
             ok: false,
             protocol_version: client.protocol_version.clone(),
@@ -261,7 +264,9 @@ fn validate_job(job: &BridgeJob) -> Result<(), BridgeError> {
         )));
     }
     if job.operations.is_empty() {
-        return Err(BridgeError::input("operations must contain at least one tool call"));
+        return Err(BridgeError::input(
+            "operations must contain at least one tool call",
+        ));
     }
     if job.operations.len() > MAX_OPERATIONS {
         return Err(BridgeError::input(format!(
@@ -289,9 +294,8 @@ fn validate_job(job: &BridgeJob) -> Result<(), BridgeError> {
 }
 
 fn validate_endpoint(value: &str) -> Result<Url, BridgeError> {
-    let url = Url::parse(value).map_err(|error| {
-        BridgeError::input(format!("endpoint is not a valid URL: {error}"))
-    })?;
+    let url = Url::parse(value)
+        .map_err(|error| BridgeError::input(format!("endpoint is not a valid URL: {error}")))?;
     if url.scheme() != "http" {
         return Err(BridgeError::input(
             "endpoint must use plain HTTP for the Desktop loopback MCP endpoint",
@@ -332,7 +336,9 @@ impl McpClient {
             .timeout(Duration::from_millis(timeout_ms))
             .no_proxy()
             .build()
-            .map_err(|error| BridgeError::runtime("client", format!("failed to build HTTP client: {error}")))?;
+            .map_err(|error| {
+                BridgeError::runtime("client", format!("failed to build HTTP client: {error}"))
+            })?;
         Ok(Self {
             http,
             endpoint,
@@ -361,7 +367,9 @@ impl McpClient {
         let response = self.post_json(&payload, Some(id), false).await?;
         let result = response
             .and_then(|value| value.get("result").cloned())
-            .ok_or_else(|| BridgeError::runtime("protocol", "initialize response is missing result"))?;
+            .ok_or_else(|| {
+                BridgeError::runtime("protocol", "initialize response is missing result")
+            })?;
         let protocol_version = result
             .get("protocolVersion")
             .and_then(Value::as_str)
@@ -394,10 +402,9 @@ impl McpClient {
             .post_json(&payload, Some(id), false)
             .await?
             .ok_or_else(|| BridgeError::runtime("protocol", "tools/call returned no response"))?;
-        response
-            .get("result")
-            .cloned()
-            .ok_or_else(|| BridgeError::runtime("protocol", "tools/call response is missing result"))
+        response.get("result").cloned().ok_or_else(|| {
+            BridgeError::runtime("protocol", "tools/call response is missing result")
+        })
     }
 
     async fn post_json(
@@ -419,11 +426,9 @@ impl McpClient {
             request = request.header(PROTOCOL_HEADER, protocol_version);
         }
 
-        let response = request
-            .json(payload)
-            .send()
-            .await
-            .map_err(|error| BridgeError::runtime("transport", format!("MCP request failed: {error}")))?;
+        let response = request.json(payload).send().await.map_err(|error| {
+            BridgeError::runtime("transport", format!("MCP request failed: {error}"))
+        })?;
 
         if let Some(value) = response.headers().get(SESSION_HEADER) {
             let session_id = value.to_str().map_err(|_| {
@@ -441,16 +446,18 @@ impl McpClient {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if response.content_length().is_some_and(|size| size > MAX_RESPONSE_BYTES as u64) {
+        if response
+            .content_length()
+            .is_some_and(|size| size > MAX_RESPONSE_BYTES as u64)
+        {
             return Err(BridgeError::runtime(
                 "response_too_large",
                 format!("MCP response exceeds the {MAX_RESPONSE_BYTES}-byte limit"),
             ));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| BridgeError::runtime("transport", format!("failed to read MCP response: {error}")))?;
+        let bytes = response.bytes().await.map_err(|error| {
+            BridgeError::runtime("transport", format!("failed to read MCP response: {error}"))
+        })?;
         if bytes.len() > MAX_RESPONSE_BYTES {
             return Err(BridgeError::runtime(
                 "response_too_large",
@@ -474,7 +481,10 @@ impl McpClient {
             if allow_empty {
                 return Ok(None);
             }
-            return Err(BridgeError::runtime("protocol", "MCP response body is empty"));
+            return Err(BridgeError::runtime(
+                "protocol",
+                "MCP response body is empty",
+            ));
         }
         if expected_id.is_none() && allow_empty {
             return Ok(None);
@@ -607,7 +617,11 @@ fn redact_text(text: &str, token: &str) -> String {
 }
 
 fn bounded_excerpt(text: &str, max_chars: usize) -> String {
-    text.chars().take(max_chars).collect::<String>().trim().to_string()
+    text.chars()
+        .take(max_chars)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn write_input_error(message: impl Into<String>) -> i32 {
@@ -676,7 +690,8 @@ mod tests {
 
     #[test]
     fn parses_streamable_http_sse_response() {
-        let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}\n\n";
+        let body =
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}\n\n";
         let value = parse_sse_response(body, 7).unwrap();
         assert_eq!(value["result"]["ok"], Value::Bool(true));
     }
