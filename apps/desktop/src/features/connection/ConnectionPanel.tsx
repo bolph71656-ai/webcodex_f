@@ -134,10 +134,6 @@ export function ConnectionPanel({
       setLocalHandoffLoading(false);
       return () => { cancelled = true; };
     }
-    // Some host/test shims can expose an older narrow Desktop API while the UI bundle
-    // is being upgraded. Treat that as unavailable handoff metadata instead of
-    // crashing the Connection page. Production builds register this command together
-    // with the UI bundle.
     if (typeof desktopApi.getLocalMcpHandoff !== "function") {
       setLocalHandoff(null);
       setLocalHandoffError(null);
@@ -256,10 +252,10 @@ export function ConnectionPanel({
       <article className="connection-current detail-card" aria-labelledby="connection-current-title">
         <h2 id="connection-current-title" className="section-title">{t("connection.current")}</h2>
         <div className="status-value">
-          <i className={`status-dot ${localModeReady ? "ready" : chatgptObserved ? "ready" : tunnelLocallyReady ? "ready" : tunnelError ? "error" : state.regular_tunnel ? "pending" : "unknown"}`} aria-hidden="true" />
-          <strong>{!state.readiness.runtime_ready ? runtimeLabel(state, t) : localModeReady ? localLabels.localOnly : chatgptObserved ? t("connection.observed") : tunnelLocallyReady ? t("connection.tunnelReady") : currentConnection(state, t)}</strong>
+          <i className={`status-dot ${chatgptObserved ? "ready" : localModeReady ? "ready" : tunnelLocallyReady ? "ready" : tunnelError ? "error" : state.regular_tunnel ? "pending" : "unknown"}`} aria-hidden="true" />
+          <strong>{!state.readiness.runtime_ready ? runtimeLabel(state, t) : chatgptObserved ? t("connection.observed") : localModeReady ? t("connection.noDesktopTunnel") : tunnelLocallyReady ? t("connection.tunnelReady") : currentConnection(state, t)}</strong>
         </div>
-        <p>{!state.readiness.runtime_ready ? t("workspace.afterStart") : localModeReady ? localLabels.description : chatgptObserved ? t("connection.observedDescription") : tunnelLocallyReady ? t("connection.waitingForChatGpt") : tunnelEstablished ? t("connection.tunnelHandoffNeedsAction") : t("connection.notVerified")}</p>
+        <p>{!state.readiness.runtime_ready ? t("workspace.afterStart") : chatgptObserved ? t("connection.observedDescription") : localModeReady ? t("connection.localDescription") : tunnelLocallyReady ? t("connection.waitingForChatGpt") : tunnelEstablished ? t("connection.tunnelHandoffNeedsAction") : t("connection.notVerified")}</p>
       </article>
 
       {error && <LocalizedError error={error} />}
@@ -288,8 +284,8 @@ export function ConnectionPanel({
               value="local"
               checked={provider === "local"}
               onChange={chooseProvider}
-              title={localLabels.localOnly}
-              description={localLabels.description}
+              title={t("connection.noDesktopTunnel")}
+              description={t("connection.localDescription")}
               disabled={mutationBusy}
             />
             <ProviderOption
@@ -365,21 +361,21 @@ export function ConnectionPanel({
         </article>
       )}
       {provider === "openai" && (
-        <>
-          <article className="connection-instructions detail-card">
-            <h2>{t("workspace.handoffTitle")}</h2>
-            <ol>
-              <li>{t("workspace.handoffOne")}</li>
-              <li>{t("workspace.handoffTwo")}</li>
-              <li>{t("workspace.verifyHint")}</li>
-            </ol>
-          </article>
-          <details className="setup-tunnel-details" open={!state.openai_tunnel_configured}>
-            <summary>{t("workspace.optionalTunnel")}</summary>
-            <p>{t("connection.description")}</p>
-            <TunnelConfigDiagnostics state={state} onState={onState} />
-          </details>
-        </>
+        <article className="connection-instructions detail-card">
+          <h2>{t("workspace.handoffTitle")}</h2>
+          <ol>
+            <li>{t("workspace.handoffOne")}</li>
+            <li>{t("workspace.handoffTwo")}</li>
+            <li>{t("workspace.verifyHint")}</li>
+          </ol>
+        </article>
+      )}
+      {!state.regular_tunnel && (
+        <details className="setup-tunnel-details" open={provider === "openai" && !state.openai_tunnel_configured}>
+          <summary>{t("workspace.optionalTunnel")}</summary>
+          <p>{t("connection.description")}</p>
+          <TunnelConfigDiagnostics state={state} onState={onState} />
+        </details>
       )}
     </section>
   );
