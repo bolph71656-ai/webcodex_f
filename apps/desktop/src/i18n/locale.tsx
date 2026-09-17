@@ -14,9 +14,9 @@ import {
 } from "react";
 
 export const LANGUAGES = [
+  { value: "ja-JP", label: "日本語" },
   { value: "zh-CN", label: "简体中文" },
   { value: "en-US", label: "English" },
-  { value: "ja-JP", label: "日本語" },
   { value: "ko-KR", label: "한국어" },
   { value: "de-DE", label: "Deutsch" },
   { value: "fr-FR", label: "Français" },
@@ -25,12 +25,12 @@ export type Locale = typeof LANGUAGES[number]["value"];
 
 const LOCALE_STORAGE_KEY = "webcodex.desktop.locale";
 
-export type MessageKey = keyof typeof zhCN;
+export type MessageKey = keyof typeof jaJP;
 
 export const messages: Record<Locale, Record<MessageKey, string>> = {
+  "ja-JP": jaJP,
   "zh-CN": zhCN,
   "en-US": enUS,
-  "ja-JP": jaJP,
   "ko-KR": koKR,
   "de-DE": deDE,
   "fr-FR": frFR,
@@ -50,9 +50,9 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 function storedLocale(): Locale {
   try {
     const value = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    return LANGUAGES.find((language) => language.value === value)?.value ?? "zh-CN";
+    return LANGUAGES.find((language) => language.value === value)?.value ?? "ja-JP";
   } catch {
-    return "zh-CN";
+    return "ja-JP";
   }
 }
 

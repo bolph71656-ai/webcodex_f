@@ -49,18 +49,19 @@ describe("LocaleProvider", () => {
     }
   });
 
-  it("defaults to zh-CN, persists English, and restores the preference after remount", async () => {
+  it("defaults to ja-JP, persists English, and restores the preference after remount", async () => {
+    window.localStorage.clear();
     const first = render(
       <LocaleProvider>
         <LocaleProbe />
       </LocaleProvider>,
     );
 
-    const chineseSelect = screen.getByRole("combobox", { name: "界面语言" });
-    expect(chineseSelect).toHaveValue("zh-CN");
-    await waitFor(() => expect(document.documentElement).toHaveAttribute("lang", "zh-CN"));
+    const japaneseSelect = screen.getByRole("combobox", { name: "言語" });
+    expect(japaneseSelect).toHaveValue("ja-JP");
+    await waitFor(() => expect(document.documentElement).toHaveAttribute("lang", "ja-JP"));
 
-    fireEvent.change(chineseSelect, { target: { value: "en-US" } });
+    fireEvent.change(japaneseSelect, { target: { value: "en-US" } });
     await waitFor(() => expect(document.documentElement).toHaveAttribute("lang", "en-US"));
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en-US");
 
@@ -73,8 +74,8 @@ describe("LocaleProvider", () => {
     const englishSelect = screen.getByRole("combobox", { name: "Language" });
     expect(englishSelect).toHaveValue("en-US");
 
-    fireEvent.change(englishSelect, { target: { value: "zh-CN" } });
-    await waitFor(() => expect(document.documentElement).toHaveAttribute("lang", "zh-CN"));
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("zh-CN");
+    fireEvent.change(englishSelect, { target: { value: "ja-JP" } });
+    await waitFor(() => expect(document.documentElement).toHaveAttribute("lang", "ja-JP"));
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("ja-JP");
   });
 });

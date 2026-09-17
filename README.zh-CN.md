@@ -1,6 +1,6 @@
 # WebCodex
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) | [日本語](README.md) | [English](README.en.md)
 
 **WebCodex 让 ChatGPT、Claude 和其他 AI Agent 直接使用你自己机器上的代码仓库和开发工具。**
 

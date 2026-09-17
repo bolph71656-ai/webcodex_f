@@ -251,8 +251,8 @@ function connectionLabel(state: DesktopState, t: Translate) {
   const exposure = state.topology?.exposure;
   if (!exposure || exposure.kind === "none") return t("connection.noDesktopTunnel");
   if (exposure.kind === "cloudflare") return "Cloudflare";
-  if (exposure.kind === "open_ai_tunnel") return "OpenAI Secure Tunnel";
-  return "Existing HTTPS";
+  if (exposure.kind === "open_ai_tunnel") return t("activity.source.regular_tunnel");
+  return "HTTPS";
 }
 
 function connectionExplanation(state: DesktopState, t: Translate) {
