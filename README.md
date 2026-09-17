@@ -1,116 +1,116 @@
 # WebCodex
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[日本語](README.md) | [English](README.en.md) | [简体中文](README.zh-CN.md)
 
-**WebCodex lets ChatGPT, Claude, and other AI agents work directly with code and developer tools on your own machines.**
+**WebCodex は、ChatGPT、Claude、その他の AI エージェントが、あなた自身のコンピューター上にあるコードや開発ツールを直接扱えるようにするためのツールです。**
 
-Ask your assistant to inspect a repository, modify code, run tests, use Git, or investigate a failure. Your repository stays on the machine where it already lives; you do not need to move the project into a hosted workspace just to use an AI coding agent.
+リポジトリの調査、コードの変更、テストの実行、Git の操作、不具合の調査などを AI アシスタントに依頼できます。リポジトリは現在あるコンピューター上にそのまま置いておけるため、AI コーディングエージェントを使うためだけにプロジェクトをホスト型ワークスペースへ移す必要はありません。
 
-## Start using WebCodex
+## WebCodex を使い始める
 
-### Everyday development: full WebCodex (recommended)
+### 日常的な開発：通常の WebCodex（推奨）
 
-If you want ChatGPT to keep using your real development environment, start with a **regular Server + Runner**. This is the full development experience: durable access to multiple projects plus project exploration, editing, Git, commands, tests, long-running work, and code navigation. Public HTTPS, Cloudflare Tunnel, and OpenAI Secure MCP Tunnel are only ways for ChatGPT to reach the Server; they do not switch you into a different restricted experience.
+ChatGPT から実際の開発環境を継続的に利用したい場合は、**通常のサーバー + ランナー**構成から始めてください。これは WebCodex の完全な開発体験で、複数プロジェクトへの継続的なアクセス、プロジェクト探索、編集、Git、コマンド、テスト、長時間実行される処理、コードナビゲーションを利用できます。公開 HTTPS、Cloudflare Tunnel、OpenAI Secure MCP Tunnel は、ChatGPT からサーバーへ到達するための接続方法にすぎず、別の制限付きモードへ切り替えるものではありません。
 
-For Windows or macOS, the recommended first path is **WebCodex Desktop + the official OpenAI Secure Tunnel**. Follow the [Desktop installation guide](docs/desktop-install.md). For CLI, an existing Server, self-hosting, or advanced setup, use the [Full Setup guide](docs/PERSONAL_SETUP.md).
+Windows または macOS では、**WebCodex Desktop + 公式 OpenAI Secure Tunnel** を最初の構成として推奨します。[デスクトップ版インストールガイド](docs/desktop-install.md)に従ってください。CLI、既存サーバー、セルフホスト、高度な構成については、[フルセットアップガイド](docs/PERSONAL_SETUP.md)を参照してください。
 
-### Just trying it for a few minutes: temporary share
+### 数分だけ試す：一時共有
 
-To quickly see whether WebCodex fits your workflow, run this inside one repository:
+WebCodex が自分のワークフローに合うかを手軽に確認するには、対象リポジトリ内で次を実行します。
 
 ```bash
 cd /path/to/your/repository
 npx --yes @yyjeqhc/webcodex share
 ```
 
-`share` starts a temporary, single-project instance of the ordinary WebCodex Adaptive Runtime and prints the ChatGPT connection values. Its temporary Project Credential limits access to that ProjectGrant; the endpoint and credential stop working when the command exits. It is intended for trials and short-lived sharing, not as the default full daily setup. See the [Quick Trial](docs/QUICK_START.md) for the exact steps.
+`share` は通常の WebCodex Adaptive Runtime を利用した、一時的な単一プロジェクト用インスタンスを起動し、ChatGPT の接続情報を表示します。一時 Project Credential によりアクセスはその ProjectGrant の範囲に制限され、コマンドを終了するとエンドポイントと認証情報も無効になります。日常利用の標準構成ではなく、試用や短時間の共有を目的とした機能です。具体的な手順は [クイックトライアル](docs/QUICK_START.md)を参照してください。
 
-## What can it do?
+## 何ができるのか
 
-- **Understand and edit code** — read, search, inspect, and make guarded changes inside configured projects.
-- **Use the real toolchain** — run commands, tests, formatters, compilers, and project-specific tooling on the machine that owns the repository.
-- **Work with Git** — inspect status and diffs while keeping repository operations visible and reviewable.
-- **Handle long-running work** — keep jobs observable instead of requiring one model turn to stay open indefinitely.
-- **Support human review** — use the [Runtime Console](docs/runtime-console.md), Workflow Session evidence, Jobs, and Git/diff review without a separate task/result acceptance subsystem.
+- **コードの理解と編集** — 設定済みプロジェクト内で、読み取り、検索、調査、安全性を考慮した変更を行えます。
+- **実際のツールチェーンを利用** — リポジトリがあるコンピューター上で、コマンド、テスト、フォーマッター、コンパイラー、プロジェクト固有のツールを実行できます。
+- **Git を利用** — リポジトリ操作を確認可能な状態に保ちながら、ステータスや差分を調査できます。
+- **長時間処理に対応** — 1 回のモデル応答を開き続ける必要なく、ジョブの状態を確認できます。
+- **人によるレビューを支援** — [Runtime Console](docs/runtime-console.md)、Workflow Session の証跡、Jobs、Git/差分レビューを利用できます。
 
-## Why WebCodex?
+## WebCodex を使う理由
 
-- **Your code stays on your machine.** The repository does not need to be copied into the chat service.
-- **The agent gets a real development environment.** It can use the same files, Git checkout, compilers, tests, and tools you already use.
-- **Work survives beyond a single request.** Long-running execution and evidence remain observable through WebCodex.
-- **Start temporary or run it long-term.** Use one-command sharing for a quick session, or connect machines to a self-hosted Server for a durable setup.
+- **コードを自分のコンピューター上に保持できます。** リポジトリをチャットサービスへコピーする必要はありません。
+- **AI エージェントが実際の開発環境を利用できます。** 普段使っているファイル、Git チェックアウト、コンパイラー、テスト、各種ツールをそのまま利用できます。
+- **作業を 1 回の依頼より長く継続できます。** 長時間実行される処理とその証跡を WebCodex 上で確認できます。
+- **一時利用から常設運用まで対応できます。** 1 コマンドの共有で短時間試すことも、セルフホストしたサーバーへ複数のコンピューターを接続して継続運用することもできます。
 
-## How it works
+## 仕組み
 
 ```text
-AI client
+AI クライアント
    |
    | MCP / HTTPS
    v
 WebCodex
    |
    v
-your machine
+あなたのコンピューター
    |
-   +-- repository
+   +-- リポジトリ
    +-- Git
-   +-- compilers / tests / developer tools
+   +-- コンパイラー / テスト / 開発ツール
 ```
 
-For the internal Server/Runner architecture, protocol surfaces, and authority boundaries, see [Architecture](docs/ARCHITECTURE.md), [MCP](docs/MCP.md), and [Authentication](docs/AUTH_MODEL.md).
+内部のサーバー/ランナー構成、プロトコル面、権限境界については、[アーキテクチャ](docs/ARCHITECTURE.md)、[MCP](docs/MCP.md)、[認証](docs/AUTH_MODEL.md)を参照してください。
 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/image?repos=yyjeqhc/webcodex&type=Date)](https://www.star-history.com/yyjeqhc/webcodex)
 
-## Platforms
+## 対応プラットフォーム
 
-- **Linux x64/arm64** — local `share`, Server, and Runner workflows.
-- **macOS x64/arm64** — Desktop local Server + Runner, OpenAI Secure Tunnel, local `share`, and standalone Runner workflows.
-- **Windows x64** — Desktop local Server + Runner with the official OpenAI Secure Tunnel, plus CLI + Runner, local foreground Server, and explicit `webcodex share --tunnel cloudflare|openai|none`.
-- **Windows arm64** — CLI + Runner, local foreground Server, and `share`; managed OpenAI `tunnel-client` is supported. The pinned Cloudflare release has no official Windows ARM64 artifact, so Cloudflare requires a trusted explicit/PATH `cloudflared`. The Desktop installer is currently Windows x64 only. WebCodex-managed Windows Server services remain unsupported outside Desktop's owned foreground runtime.
+- **Linux x64/arm64** — ローカル `share`、サーバー、ランナーの各ワークフロー。
+- **macOS x64/arm64** — デスクトップ版のローカルサーバー + ランナー、OpenAI Secure Tunnel、ローカル `share`、単独ランナー。
+- **Windows x64** — デスクトップ版のローカルサーバー + ランナーと公式 OpenAI Secure Tunnel、CLI + ランナー、ローカルのフォアグラウンドサーバー、明示的な `webcodex share --tunnel cloudflare|openai|none`。
+- **Windows arm64** — CLI + ランナー、ローカルのフォアグラウンドサーバー、`share`。管理対象 OpenAI `tunnel-client` に対応しています。固定されている Cloudflare リリースには公式 Windows ARM64 アーティファクトがないため、Cloudflare を使う場合は信頼できる明示指定または PATH 上の `cloudflared` が必要です。デスクトップ版インストーラーは現在 Windows x64 のみです。デスクトップ版が所有するフォアグラウンド実行環境以外では、WebCodex 管理の Windows サーバーサービスは未対応です。
 
-Windows and long-lived deployments are covered in [Deployment](docs/DEPLOYMENT.md) and [MCP](docs/MCP.md).
+Windows と長期運用については、[Deployment](docs/DEPLOYMENT.md) と [MCP](docs/MCP.md) を参照してください。
 
-## Existing Servers and advanced setup
+## 既存サーバーと高度な設定
 
-If someone already provides the WebCodex Server and connection credential, use that existing Server and follow the [Full Setup guide](docs/PERSONAL_SETUP.md). For a normal Windows/macOS personal installation, use the [Desktop guide](docs/desktop-install.md). Use [Deployment](docs/DEPLOYMENT.md) only for production hosting, multiple users, systemd/Docker, OAuth, proxies, and private CAs.
+すでに WebCodex サーバーと接続用認証情報が提供されている場合は、その既存サーバーを利用し、[フルセットアップガイド](docs/PERSONAL_SETUP.md)に従ってください。通常の Windows/macOS 個人利用では、[デスクトップ版ガイド](docs/desktop-install.md)を使用してください。[Deployment](docs/DEPLOYMENT.md) は、本番ホスティング、複数ユーザー、systemd/Docker、OAuth、プロキシ、プライベート CA などの用途向けです。
 
-Those are follow-up operating concerns, not concepts a first-time user should have to learn before WebCodex works.
+これらは初回利用時に理解しておくべき必須概念ではなく、運用開始後に必要に応じて扱う項目です。
 
-## Documentation
+## ドキュメント
 
-- [Desktop installation](docs/desktop-install.md) — recommended Windows/macOS path: Desktop + official OpenAI Secure Tunnel
-- [Using Desktop](docs/desktop-guide.md) — projects, connections, activity, and background operation
-- [Full Setup](docs/PERSONAL_SETUP.md) — CLI, existing Server, Linux, and advanced regular Server + Runner setup
-- [Quick Trial](docs/QUICK_START.md) — temporarily try one repository with `share`
-- [MCP](docs/MCP.md) — ChatGPT, Claude, authentication choices, and MCP reference
-- [Deployment](docs/DEPLOYMENT.md) — production, self-hosting, and advanced operations
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — connection and runtime problems
-- [CLI](docs/CLI.md) — command and credential reference
-- [AI-assisted setup](docs/AI_ONBOARDING.md) — have an AI agent help configure WebCodex
-- [Security](SECURITY.md) — security model and operational guidance
-- [Documentation index](docs/INDEX.md) — all user and contributor documentation
+- [デスクトップ版インストール](docs/desktop-install.md) — Windows/macOS 向け推奨構成：デスクトップ版 + 公式 OpenAI Secure Tunnel
+- [デスクトップ版の使い方](docs/desktop-guide.md) — プロジェクト、接続、アクティビティ、バックグラウンド動作
+- [フルセットアップ](docs/PERSONAL_SETUP.md) — CLI、既存サーバー、Linux、高度な通常サーバー + ランナー構成
+- [クイックトライアル](docs/QUICK_START.md) — `share` で 1 リポジトリを一時的に試す
+- [MCP](docs/MCP.md) — ChatGPT、Claude、認証方式、MCP リファレンス
+- [Deployment](docs/DEPLOYMENT.md) — 本番運用、セルフホスト、高度な運用
+- [トラブルシューティング](docs/TROUBLESHOOTING.md) — 接続と実行環境の問題
+- [CLI](docs/CLI.md) — コマンドと認証情報のリファレンス
+- [AI 支援セットアップ](docs/AI_ONBOARDING.md) — AI エージェントに WebCodex の設定を支援してもらう
+- [セキュリティ](SECURITY.md) — セキュリティモデルと運用上の注意
+- [ドキュメント一覧](docs/INDEX.md) — 利用者・コントリビューター向けドキュメント一覧
 
-## Security
+## セキュリティ
 
-WebCodex can read and modify files and execute commands inside configured project boundaries. Use version control, keep credentials out of prompts/logs/Git, and register only project roots the assistant should access. Read [SECURITY.md](SECURITY.md) for the complete model.
+WebCodex は、設定済みプロジェクトの境界内でファイルを読み書きし、コマンドを実行できます。バージョン管理を利用し、認証情報をプロンプト・ログ・Git に含めず、AI アシスタントからアクセスさせてよいプロジェクトルートだけを登録してください。完全なセキュリティモデルは [SECURITY.md](SECURITY.md) を参照してください。
 
-## Build from source
+## ソースからビルド
 
 ```bash
 cargo build --release --workspace --bins
 export PATH="$PWD/target/release:$PATH"
 ```
 
-## Contributing
+## コントリビューション
 
-Contributions are welcome, including contributions created with WebCodex itself or other coding agents. For bug reports, development workflow, and pull request guidance, see [CONTRIBUTING.md](CONTRIBUTING.md).
+WebCodex 自身や他のコーディングエージェントを利用して作成した変更も含め、コントリビューションを歓迎します。不具合報告、開発フロー、プルリクエストのガイドラインについては [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
-## Acknowledgements
+## 謝辞
 
-Thanks to the [LINUX DO](https://linux.do/) community for its welcoming space for technical discussion and support for open-source sharing.
+技術的な議論とオープンソース共有を支える場を提供している [LINUX DO](https://linux.do/) コミュニティに感謝します。
 
-## License
+## ライセンス
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+Apache License, Version 2.0 で提供されます。詳細は [LICENSE](LICENSE) を参照してください。
