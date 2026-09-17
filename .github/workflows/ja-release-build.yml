@@ -50,6 +50,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ja-release-win32-x64
+          cache-on-failure: true
 
       - name: Test and build Desktop frontend
         shell: pwsh
@@ -80,15 +81,17 @@ jobs:
             if ($output -ne $expected) { throw "unexpected identity: $output (expected $expected)" }
           }
 
-      - name: Package Windows CLI archive
+      - name: Package Windows CLI release candidate
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
-          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_release_artifact.ps1 -BinDir $binDir -OutDir dist -Version $env:VERSION -Platform $env:WEBCODEX_RELEASE_PLATFORM
-          if ($LASTEXITCODE -ne 0) { throw "release packaging failed" }
-          $archive = Join-Path dist "webcodex-v$env:VERSION-$env:WEBCODEX_RELEASE_PLATFORM.tar.gz"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_release_artifact.ps1 -BinDir $binDir -OutDir dist -Version $env:VERSION -Platform $env:WEBCODEX_RELEASE_PLATFORM -AllowDevelopmentBuild
+          if ($LASTEXITCODE -ne 0) { throw "release candidate packaging failed" }
+          $canonicalArchive = Join-Path dist "webcodex-v$env:VERSION-$env:WEBCODEX_RELEASE_PLATFORM.tar.gz"
+          $archive = Join-Path dist "webcodex-v$env:VERSION-ja-candidate-$env:WEBCODEX_RELEASE_PLATFORM.tar.gz"
+          Move-Item -LiteralPath $canonicalArchive -Destination $archive
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           [System.IO.File]::WriteAllText("$archive.sha256", "$hash  $(Split-Path -Leaf $archive)`n", [System.Text.Encoding]::ASCII)
 
@@ -97,14 +100,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
-          $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-ja-win32-x64-release-bundle"
+          $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-ja-win32-x64-release-candidate-bundle"
           & .\scripts\prepare_desktop_bundle.ps1 -BinDir $binDir -Version $env:VERSION -SourceSha $env:SOURCE_SHA -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT) -OutputDir $stage
           if ($LASTEXITCODE -ne 0) { throw "desktop staging failed" }
           "DESKTOP_TAURI_CONFIG=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_ENV
           "DESKTOP_TAURI_TARGET=$(Join-Path $env:GITHUB_WORKSPACE 'target\desktop-ja-win32-x64-tauri')" >> $env:GITHUB_ENV
-          "DESKTOP_INSTALLER_NAME=webcodex-desktop-v$env:VERSION-ja-win32-x64-setup.exe" >> $env:GITHUB_ENV
+          "DESKTOP_INSTALLER_NAME=webcodex-desktop-v$env:VERSION-ja-candidate-win32-x64-setup.exe" >> $env:GITHUB_ENV
 
-      - name: Build Windows Desktop NSIS installer
+      - name: Build Windows Desktop NSIS release candidate
         working-directory: apps/desktop
         shell: pwsh
         run: |
@@ -128,15 +131,15 @@ jobs:
           $ErrorActionPreference = "Stop"
           Get-Content dist\*.sha256 | Set-Content -Encoding ascii dist\SHA256SUMS
 
-      - name: Upload Japanese Windows release files
+      - name: Upload Japanese Windows release candidate files
         uses: actions/upload-artifact@v4
         with:
-          name: webcodex-v0.4.1-ja-win32-x64-release
+          name: webcodex-v0.4.1-ja-win32-x64-release-candidate
           path: |
-            dist/webcodex-v0.4.1-win32-x64.tar.gz
-            dist/webcodex-v0.4.1-win32-x64.tar.gz.sha256
-            dist/webcodex-desktop-v0.4.1-ja-win32-x64-setup.exe
-            dist/webcodex-desktop-v0.4.1-ja-win32-x64-setup.exe.sha256
+            dist/webcodex-v0.4.1-ja-candidate-win32-x64.tar.gz
+            dist/webcodex-v0.4.1-ja-candidate-win32-x64.tar.gz.sha256
+            dist/webcodex-desktop-v0.4.1-ja-candidate-win32-x64-setup.exe
+            dist/webcodex-desktop-v0.4.1-ja-candidate-win32-x64-setup.exe.sha256
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
