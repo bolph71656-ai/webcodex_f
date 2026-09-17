@@ -370,13 +370,11 @@ export function ConnectionPanel({
           </ol>
         </article>
       )}
-      {!state.regular_tunnel && (
-        <details className="setup-tunnel-details" open={provider === "openai" && !state.openai_tunnel_configured}>
-          <summary>{t("workspace.optionalTunnel")}</summary>
-          <p>{t("connection.description")}</p>
-          <TunnelConfigDiagnostics state={state} onState={onState} />
-        </details>
-      )}
+      <details className="setup-tunnel-details" open={!state.openai_tunnel_configured}>
+        <summary>{t("workspace.optionalTunnel")}</summary>
+        <p>{t("connection.description")}</p>
+        <TunnelConfigDiagnostics state={state} onState={onState} />
+      </details>
     </section>
   );
 }
