@@ -14,7 +14,151 @@ import type {
   ProjectSelection,
 } from "../../models/topology";
 
-type SetupMode = "local" | "remote" | "share";
+type SetupMode = "local" | "remote" | "share" | "rdc";
+type RdcVerification = "idle" | "checking" | "ready";
+
+const RDC_SETUP_LABELS = {
+  "ja-JP": {
+    badge: "ChatGPT Plus + RDC",
+    entryTitle: "ChatGPT Plus + RDC を自動セットアップ",
+    entryDescription: "Tunnel や Codex を使わず、RDC からローカル WebCodex Bridge を使う構成を自動で準備します。",
+    label: "ローカル自動接続",
+    title: "ChatGPT Plus + RDC をセットアップ",
+    description: "プロジェクトを選ぶだけで Service / Runner / Local MCP を起動し、Bridge が自動検出できる状態まで確認します。",
+    privacy: "Tunnel ID、OpenAI API key、Bearer token の手動入力やコピーは不要です。Bearer token はこの画面に表示しません。",
+    autoSetup: "自動セットアップ",
+    retest: "接続テストを再実行",
+    complete: "セットアップ完了",
+    readyTitle: "WebCodex 側の準備が完了しました",
+    readyDescription: "RDC から webcodex mcp-bridge を呼び出すと、Desktop のローカル MCP 接続情報を自動検出できます。",
+    checking: "ローカル MCP と Bridge 自動検出を確認しています…",
+    service: "Service",
+    runner: "Runner",
+    project: "Project",
+    localMcp: "Local MCP",
+    bridge: "Bridge 自動検出",
+    ready: "Ready",
+    pending: "未確認",
+    noTerminal: "端末で URL や token を設定する必要はありません。",
+  },
+  "zh-CN": {
+    badge: "ChatGPT Plus + RDC",
+    entryTitle: "自动设置 ChatGPT Plus + RDC",
+    entryDescription: "无需 Tunnel 或 Codex，自动准备 RDC 使用本地 WebCodex Bridge 的配置。",
+    label: "本地自动连接",
+    title: "设置 ChatGPT Plus + RDC",
+    description: "只需选择项目，即可启动 Service / Runner / Local MCP，并验证 Bridge 自动发现。",
+    privacy: "无需手动输入或复制 Tunnel ID、OpenAI API key 或 Bearer token。此页面不会显示 Bearer token。",
+    autoSetup: "自动设置",
+    retest: "重新运行连接测试",
+    complete: "完成设置",
+    readyTitle: "WebCodex 已准备就绪",
+    readyDescription: "RDC 调用 webcodex mcp-bridge 时，可以自动发现 Desktop 的本地 MCP 连接信息。",
+    checking: "正在验证本地 MCP 和 Bridge 自动发现…",
+    service: "Service",
+    runner: "Runner",
+    project: "Project",
+    localMcp: "Local MCP",
+    bridge: "Bridge 自动发现",
+    ready: "Ready",
+    pending: "未验证",
+    noTerminal: "无需在终端配置 URL 或 token。",
+  },
+  "en-US": {
+    badge: "ChatGPT Plus + RDC",
+    entryTitle: "Auto-setup ChatGPT Plus + RDC",
+    entryDescription: "Prepare RDC to use the local WebCodex Bridge without Tunnel or Codex.",
+    label: "Local automatic connection",
+    title: "Set up ChatGPT Plus + RDC",
+    description: "Choose a project and Desktop starts Service / Runner / Local MCP, then verifies Bridge auto-discovery.",
+    privacy: "No manual Tunnel ID, OpenAI API key, or Bearer token entry/copy is required. The Bearer token is never shown here.",
+    autoSetup: "Auto setup",
+    retest: "Run connection test again",
+    complete: "Finish setup",
+    readyTitle: "WebCodex is ready",
+    readyDescription: "When RDC invokes webcodex mcp-bridge, it can auto-discover the Desktop local MCP connection.",
+    checking: "Checking Local MCP and Bridge auto-discovery…",
+    service: "Service",
+    runner: "Runner",
+    project: "Project",
+    localMcp: "Local MCP",
+    bridge: "Bridge auto-discovery",
+    ready: "Ready",
+    pending: "Not verified",
+    noTerminal: "No terminal URL or token setup is required.",
+  },
+  "ko-KR": {
+    badge: "ChatGPT Plus + RDC",
+    entryTitle: "ChatGPT Plus + RDC 자동 설정",
+    entryDescription: "Tunnel이나 Codex 없이 RDC에서 로컬 WebCodex Bridge를 사용하도록 자동 준비합니다.",
+    label: "로컬 자동 연결",
+    title: "ChatGPT Plus + RDC 설정",
+    description: "프로젝트만 선택하면 Service / Runner / Local MCP를 시작하고 Bridge 자동 검색까지 확인합니다.",
+    privacy: "Tunnel ID, OpenAI API key, Bearer token을 수동으로 입력하거나 복사할 필요가 없습니다. Bearer token은 이 화면에 표시되지 않습니다.",
+    autoSetup: "자동 설정",
+    retest: "연결 테스트 다시 실행",
+    complete: "설정 완료",
+    readyTitle: "WebCodex 준비가 완료되었습니다",
+    readyDescription: "RDC에서 webcodex mcp-bridge를 호출하면 Desktop의 로컬 MCP 연결 정보를 자동으로 찾습니다.",
+    checking: "Local MCP와 Bridge 자동 검색을 확인하는 중…",
+    service: "Service",
+    runner: "Runner",
+    project: "Project",
+    localMcp: "Local MCP",
+    bridge: "Bridge 자동 검색",
+    ready: "Ready",
+    pending: "확인 안 됨",
+    noTerminal: "터미널에서 URL이나 token을 설정할 필요가 없습니다.",
+  },
+  "de-DE": {
+    badge: "ChatGPT Plus + RDC",
+    entryTitle: "ChatGPT Plus + RDC automatisch einrichten",
+    entryDescription: "RDC für die lokale WebCodex Bridge ohne Tunnel oder Codex automatisch vorbereiten.",
+    label: "Automatische lokale Verbindung",
+    title: "ChatGPT Plus + RDC einrichten",
+    description: "Projekt auswählen; Desktop startet Service / Runner / Local MCP und prüft die Bridge-Autoerkennung.",
+    privacy: "Tunnel ID, OpenAI API key und Bearer token müssen nicht manuell eingegeben oder kopiert werden. Der Bearer token wird hier nicht angezeigt.",
+    autoSetup: "Automatisch einrichten",
+    retest: "Verbindung erneut testen",
+    complete: "Einrichtung abschließen",
+    readyTitle: "WebCodex ist bereit",
+    readyDescription: "Wenn RDC webcodex mcp-bridge aufruft, werden die lokalen MCP-Verbindungsdaten von Desktop automatisch erkannt.",
+    checking: "Local MCP und Bridge-Autoerkennung werden geprüft…",
+    service: "Service",
+    runner: "Runner",
+    project: "Project",
+    localMcp: "Local MCP",
+    bridge: "Bridge-Autoerkennung",
+    ready: "Ready",
+    pending: "Nicht geprüft",
+    noTerminal: "Keine URL- oder Token-Konfiguration im Terminal erforderlich.",
+  },
+  "fr-FR": {
+    badge: "ChatGPT Plus + RDC",
+    entryTitle: "Configurer automatiquement ChatGPT Plus + RDC",
+    entryDescription: "Préparer RDC pour utiliser le Bridge WebCodex local sans Tunnel ni Codex.",
+    label: "Connexion locale automatique",
+    title: "Configurer ChatGPT Plus + RDC",
+    description: "Choisissez un projet : Desktop démarre Service / Runner / Local MCP puis vérifie la détection automatique du Bridge.",
+    privacy: "Aucune saisie ou copie manuelle de Tunnel ID, OpenAI API key ou Bearer token n'est nécessaire. Le Bearer token n'est jamais affiché ici.",
+    autoSetup: "Configuration automatique",
+    retest: "Relancer le test de connexion",
+    complete: "Terminer la configuration",
+    readyTitle: "WebCodex est prêt",
+    readyDescription: "Lorsque RDC appelle webcodex mcp-bridge, les informations MCP locales de Desktop sont détectées automatiquement.",
+    checking: "Vérification de Local MCP et de la détection automatique du Bridge…",
+    service: "Service",
+    runner: "Runner",
+    project: "Project",
+    localMcp: "Local MCP",
+    bridge: "Détection auto du Bridge",
+    ready: "Ready",
+    pending: "Non vérifié",
+    noTerminal: "Aucune configuration d'URL ou de token dans le terminal n'est nécessaire.",
+  },
+} as const;
+
+type RdcLabels = (typeof RDC_SETUP_LABELS)[keyof typeof RDC_SETUP_LABELS];
 
 interface FirstRunProps {
   state: DesktopState;
@@ -24,7 +168,8 @@ interface FirstRunProps {
 }
 
 export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }: FirstRunProps) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
+  const rdcLabels = RDC_SETUP_LABELS[locale];
   const initialMode = useMemo<SetupMode | null>(() => {
     if (chooseModeFirst) return null;
     if (state.topology?.experience === "quick_share") return "share";
@@ -43,6 +188,8 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
   const [remoteEnrollmentNeedsRefresh, setRemoteEnrollmentNeedsRefresh] = useState(false);
   const [provider, setProvider] = useState<QuickShareProvider>("cloudflare");
   const [connectAfterSetup, setConnectAfterSetup] = useState(state.openai_tunnel_configured);
+  const [rdcVerification, setRdcVerification] = useState<RdcVerification>("idle");
+  const [rdcSnapshot, setRdcSnapshot] = useState<DesktopState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<DesktopError | null>(null);
   const mutationBusy = busy || Boolean(state.current_operation);
@@ -65,6 +212,8 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       });
       if (typeof selection !== "string") return;
       setProject(await desktopApi.inspectProject(selection));
+      setRdcVerification("idle");
+      setRdcSnapshot(null);
     } catch (value) {
       setError(normalizeDesktopError(value));
     }
@@ -75,7 +224,32 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
     setBusy(true);
     setError(null);
     try {
-      if (mode === "local") {
+      if (mode === "rdc") {
+        setRdcVerification("checking");
+        const next = await desktopApi.configureLocal(project.path);
+        onState(next);
+        setRdcSnapshot(next);
+        if (!next.readiness.runtime_ready) {
+          throw {
+            code: "local_mcp_unavailable",
+            message: "Local runtime did not become ready during RDC automatic setup",
+            next_action: "Retry automatic setup after Service, Runner, and Project are ready.",
+          };
+        }
+        const handoff = await desktopApi.getLocalMcpHandoff();
+        if (
+          handoff.authentication !== "bearer" ||
+          !handoff.loopbackOnly ||
+          !handoff.credentialAvailable
+        ) {
+          throw {
+            code: "local_mcp_unavailable",
+            message: "Desktop local MCP handoff is not ready for Bridge auto-discovery",
+            next_action: "Retry automatic setup.",
+          };
+        }
+        setRdcVerification("ready");
+      } else if (mode === "local") {
         let next = await desktopApi.configureLocal(project.path);
         onState(next);
         if (connectAfterSetup && next.openai_tunnel_configured && next.readiness.runtime_ready && !next.regular_tunnel) {
@@ -101,6 +275,7 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
         onComplete?.();
       }
     } catch (value) {
+      if (mode === "rdc") setRdcVerification("idle");
       const normalized = normalizeDesktopError(value);
       if (mode === "remote" && normalized.code === "pairing_code_invalid") {
         // The optimistic reuse hint is based on saved Desktop state. If the
@@ -127,6 +302,11 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
           <li><span>03</span>{t("workspace.verify")}</li>
         </ol>
         <div className="entry-grid">
+          <button className="entry-card" onClick={() => setMode("rdc")} data-webcodex-action="choose-rdc-setup">
+            <span className="entry-badge">{rdcLabels.badge}</span>
+            <strong>{rdcLabels.entryTitle}</strong>
+            <span>{rdcLabels.entryDescription}</span>
+          </button>
           <button className="entry-card recommended" onClick={() => setMode("local")} data-webcodex-action="choose-local-setup">
             <span className="entry-badge">{t("first.recommended")}</span>
             <strong>{t("first.localTitle")}</strong>
@@ -148,6 +328,15 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
   const presentation = error ? desktopErrorPresentation(error, t) : null;
   const serverInvalid = error?.code === "server_url_invalid" || error?.code === "server_unreachable";
   const pairingInvalid = error?.code === "pairing_code_invalid";
+  const observedRdcState = rdcSnapshot ?? state;
+  const rdcServiceReady = observedRdcState.readiness.server === "ready";
+  const rdcRunnerReady = observedRdcState.readiness.runner === "ready";
+  const rdcProjectReady = Boolean(
+    project &&
+      observedRdcState.readiness.project === "ready" &&
+      observedRdcState.project?.path === project.path,
+  );
+  const rdcMcpReady = rdcVerification === "ready";
 
   return (
     <form
@@ -163,14 +352,14 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       <button type="button" className="back-button" onClick={() => setMode(null)} data-webcodex-action="show-setup-options">
         {t("setup.back")}
       </button>
-      <div className="eyebrow">{modeLabel(mode, t)}</div>
-      <h1 id="setup-title">{setupTitle(mode, t)}</h1>
-      <p className="lede">{setupDescription(mode, t)}</p>
+      <div className="eyebrow">{modeLabel(mode, t, rdcLabels)}</div>
+      <h1 id="setup-title">{setupTitle(mode, t, rdcLabels)}</h1>
+      <p className="lede">{setupDescription(mode, t, rdcLabels)}</p>
       <div className="project-picker-card">
         <div>
           <span className="section-kicker">{t("setup.project")}</span>
           <strong>{project ? project.path : t("setup.chooseProject")}</strong>
-          {mode === "local" && !project && (
+          {(mode === "local" || mode === "rdc") && !project && (
             <span className="project-meta">{t("setup.projectRequired")}</span>
           )}
           {project && (
@@ -188,6 +377,28 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       </div>
 
       <PowerShellInstallGuidance state={state} onState={onState} />
+
+      {mode === "rdc" && (
+        <article
+          className="detail-card"
+          aria-labelledby="rdc-setup-status-title"
+          data-webcodex-rdc-ready={rdcVerification === "ready" ? "true" : "false"}
+        >
+          <span className="section-kicker">{rdcLabels.badge}</span>
+          <h2 id="rdc-setup-status-title">
+            {rdcVerification === "ready" ? rdcLabels.readyTitle : rdcLabels.title}
+          </h2>
+          <p>{rdcVerification === "ready" ? rdcLabels.readyDescription : rdcLabels.privacy}</p>
+          {rdcVerification === "checking" && <p className="inline-note">{rdcLabels.checking}</p>}
+          <dl className="detail-list">
+            <SetupCheck label={rdcLabels.service} ready={rdcServiceReady} labels={rdcLabels} />
+            <SetupCheck label={rdcLabels.runner} ready={rdcRunnerReady} labels={rdcLabels} />
+            <SetupCheck label={rdcLabels.project} ready={rdcProjectReady} labels={rdcLabels} />
+            <SetupCheck label={rdcLabels.localMcp} ready={rdcMcpReady} labels={rdcLabels} />
+            <SetupCheck label={rdcLabels.bridge} ready={rdcMcpReady} labels={rdcLabels} />
+          </dl>
+        </article>
+      )}
 
       {mode === "local" && (
         <details className="setup-tunnel-details">
@@ -319,21 +530,52 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       )}
 
       <div className="setup-actions">
-        <button
-          type="submit"
-          className="primary-button"
-          disabled={
-            mutationBusy ||
-            !project ||
-            (mode === "remote" &&
-              (!serverUrl.trim() || (!canReuseRemoteEnrollment && !pairingCode.trim())))
-          }
-          data-webcodex-action={mode === "local" ? "configure-local" : mode === "remote" ? "configure-remote" : "start-quick-share"}
-        >
-          {mutationBusy ? t("common.checking") : actionLabel(mode, canReuseRemoteEnrollment, t)}
-        </button>
+        {mode === "rdc" && rdcVerification === "ready" ? (
+          <>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => onComplete?.()}
+              data-webcodex-action="complete-rdc-setup"
+            >
+              {rdcLabels.complete}
+            </button>
+            <button
+              type="submit"
+              className="secondary-button"
+              disabled={mutationBusy || !project}
+              data-webcodex-action="configure-rdc-auto"
+            >
+              {rdcLabels.retest}
+            </button>
+          </>
+        ) : (
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={
+              mutationBusy ||
+              !project ||
+              (mode === "remote" &&
+                (!serverUrl.trim() || (!canReuseRemoteEnrollment && !pairingCode.trim())))
+            }
+            data-webcodex-action={
+              mode === "rdc"
+                ? "configure-rdc-auto"
+                : mode === "local"
+                  ? "configure-local"
+                  : mode === "remote"
+                    ? "configure-remote"
+                    : "start-quick-share"
+            }
+          >
+            {mutationBusy ? t("common.checking") : actionLabel(mode, canReuseRemoteEnrollment, t, rdcLabels)}
+          </button>
+        )}
         <span className="action-help">
-          {mutationBusy ? t("setup.verifying") : t("setup.noTerminal")}
+          {mutationBusy
+            ? mode === "rdc" ? rdcLabels.checking : t("setup.verifying")
+            : mode === "rdc" ? rdcLabels.noTerminal : t("setup.noTerminal")}
         </span>
       </div>
     </form>
@@ -342,11 +584,25 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
 
 type Translate = ReturnType<typeof useLocale>["t"];
 
-function modeLabel(mode: SetupMode, t: Translate) {
+function SetupCheck({ label, ready, labels }: { label: string; ready: boolean; labels: RdcLabels }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd className="status-value">
+        <i className={`status-dot ${ready ? "ready" : "unknown"}`} aria-hidden="true" />
+        {ready ? labels.ready : labels.pending}
+      </dd>
+    </div>
+  );
+}
+
+function modeLabel(mode: SetupMode, t: Translate, rdcLabels: RdcLabels) {
+  if (mode === "rdc") return rdcLabels.label;
   return mode === "local" ? t("setup.localLabel") : mode === "remote" ? t("setup.remoteLabel") : t("setup.shareLabel");
 }
 
-function setupTitle(mode: SetupMode, t: Translate) {
+function setupTitle(mode: SetupMode, t: Translate, rdcLabels: RdcLabels) {
+  if (mode === "rdc") return rdcLabels.title;
   return mode === "local"
     ? t("setup.localTitle")
     : mode === "remote"
@@ -354,13 +610,15 @@ function setupTitle(mode: SetupMode, t: Translate) {
       : t("setup.shareTitle");
 }
 
-function setupDescription(mode: SetupMode, t: Translate) {
+function setupDescription(mode: SetupMode, t: Translate, rdcLabels: RdcLabels) {
+  if (mode === "rdc") return rdcLabels.description;
   if (mode === "local") return t("setup.localDescription");
   if (mode === "remote") return t("setup.remoteDescription");
   return t("setup.shareDescription");
 }
 
-function actionLabel(mode: SetupMode, canReuseRemoteEnrollment: boolean, t: Translate) {
+function actionLabel(mode: SetupMode, canReuseRemoteEnrollment: boolean, t: Translate, rdcLabels: RdcLabels) {
+  if (mode === "rdc") return rdcLabels.autoSetup;
   if (mode === "local") return t("setup.setUp");
   if (mode === "remote") return canReuseRemoteEnrollment ? t("setup.reconnect") : t("setup.connect");
   return t("setup.startShare");
