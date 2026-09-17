@@ -372,7 +372,7 @@ function sameServerOrigin(left: string, right: string) {
 
 function providerLabel(provider: QuickShareProvider, t: Translate) {
   if (provider === "cloudflare") return "Cloudflare";
-  if (provider === "openai") return "OpenAI Secure Tunnel";
+  if (provider === "openai") return t("activity.source.regular_tunnel");
   return t("common.noChatGpt");
 }
 
