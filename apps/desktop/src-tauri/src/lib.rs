@@ -62,6 +62,8 @@ pub fn run() {
             commands::stop_quick_share,
             commands::start_regular_tunnel,
             commands::stop_regular_tunnel,
+            commands::get_local_mcp_handoff,
+            commands::get_local_mcp_credential,
             commands::stop_local_runtime,
             commands::cancel_desktop_operation,
             commands::get_bounded_activity,
