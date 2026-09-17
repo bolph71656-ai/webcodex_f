@@ -260,11 +260,7 @@ async fn execute_job(job: BridgeJob) -> Result<BridgeOutput, BridgeError> {
     validate_job(&job)?;
     let connection = resolve_connection(&job)?;
     let connection_source = connection.source;
-    let mut client = McpClient::new(
-        connection.endpoint,
-        connection.bearer_token,
-        job.timeout_ms,
-    )?;
+    let mut client = McpClient::new(connection.endpoint, connection.bearer_token, job.timeout_ms)?;
 
     if let Err(mut error) = client.initialize().await {
         redact_error(&mut error, &client.bearer_token);
@@ -658,10 +654,7 @@ fn discover_desktop_connection_from_state_path(
     })?;
     let token_bytes = read_bounded_file(&token_path, MAX_TOKEN_BYTES, "Desktop MCP credential")?;
     let token = String::from_utf8(token_bytes).map_err(|_| {
-        BridgeError::runtime(
-            "desktop_state",
-            "Desktop MCP credential is not valid UTF-8",
-        )
+        BridgeError::runtime("desktop_state", "Desktop MCP credential is not valid UTF-8")
     })?;
     let bearer_token = token.trim().to_string();
     if bearer_token.is_empty() {
@@ -748,9 +741,7 @@ fn read_bounded_file(path: &Path, max_bytes: usize, label: &str) -> Result<Vec<u
     let mut bytes = Vec::new();
     file.take((max_bytes + 1) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|_| {
-            BridgeError::runtime("desktop_state", format!("failed to read {label}"))
-        })?;
+        .map_err(|_| BridgeError::runtime("desktop_state", format!("failed to read {label}")))?;
     if bytes.is_empty() || bytes.len() > max_bytes {
         return Err(BridgeError::runtime(
             "desktop_state",
@@ -887,9 +878,9 @@ fn interpolate_string(
     while let Some(start) = rest.find("${") {
         output.push_str(&rest[..start]);
         let after = &rest[start + 2..];
-        let end = after.find('}').ok_or_else(|| {
-            BridgeError::runtime("reference", "unterminated ${...} reference")
-        })?;
+        let end = after
+            .find('}')
+            .ok_or_else(|| BridgeError::runtime("reference", "unterminated ${...} reference"))?;
         let name = &after[..end];
         if !valid_variable_name(name) {
             return Err(BridgeError::runtime(
@@ -898,10 +889,7 @@ fn interpolate_string(
             ));
         }
         let value = variables.get(name).ok_or_else(|| {
-            BridgeError::runtime(
-                "reference",
-                format!("unknown captured variable {name:?}"),
-            )
+            BridgeError::runtime("reference", format!("unknown captured variable {name:?}"))
         })?;
         output.push_str(&scalar_to_string(value).ok_or_else(|| {
             BridgeError::runtime(
@@ -1360,10 +1348,8 @@ mod tests {
     #[test]
     fn captures_json_pointer_values() {
         let mut variables = BTreeMap::new();
-        let capture = BTreeMap::from([(
-            "jobId".to_string(),
-            "/structuredContent/job/id".to_string(),
-        )]);
+        let capture =
+            BTreeMap::from([("jobId".to_string(), "/structuredContent/job/id".to_string())]);
         let result = json!({"structuredContent":{"job":{"id":"job-9"}}});
         capture_values(&capture, &result, &mut variables).unwrap();
         assert_eq!(variables["jobId"], "job-9");
