@@ -24,6 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -32,7 +33,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $actual = (git rev-parse HEAD).Trim()
-          if ($actual -ne $env:GITHUB_SHA) { throw "checkout SHA mismatch: $actual" }
+          if ($actual -ne $env:SOURCE_SHA) { throw "checkout SHA mismatch: $actual (expected $env:SOURCE_SHA)" }
           if (@(git status --porcelain --untracked-files=all).Count -ne 0) { throw "checkout is not clean" }
 
       - uses: dtolnay/rust-toolchain@stable
